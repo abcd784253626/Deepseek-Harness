@@ -30,7 +30,9 @@ const NPM_GLOBAL_CANDIDATES = [
 
 function probeVersion(entry: string): string | null {
   try {
-    const res = spawnSync(process.execPath, [entry, '--version'], {
+    // 必须用系统 Node 执行 bin.js（打包环境下 process.execPath 是 exe 而非 node）
+    const node = resolveSystemNode() ?? process.execPath
+    const res = spawnSync(node, [entry, '--version'], {
       timeout: 8000,
       encoding: 'utf-8',
       windowsHide: true
