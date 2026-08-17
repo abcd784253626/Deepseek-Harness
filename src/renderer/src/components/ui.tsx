@@ -1,7 +1,7 @@
 /**
  * 极简 UI 基元：药丸按钮 / 开关 / 分段选择 / 徽章 / 弹窗
  */
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
@@ -184,5 +184,60 @@ export function EmptyState({ icon, text }: { icon: ReactNode; text: string }): R
       {icon}
       <span className="text-[13px]">{text}</span>
     </div>
+  )
+}
+
+/**
+ * RangeSlider —— 非受控 + 原生 input 事件监听。
+ * React 19 对受控 range input 的 onChange 存在已知问题（事件处理期间 DOM 值被
+ * 受控回滚、异步 onChange 链失效），此组件用原生监听器绕开 React 事件系统，
+ * 保证拖动即时生效；外部 value 变化时（非聚焦状态）同步 DOM。
+ */
+export function RangeSlider({
+  min,
+  max,
+  value,
+  onChange,
+  className = '',
+  title
+}: {
+  min: number
+  max: number
+  value: number
+  onChange: (v: number) => void
+  className?: string
+  title?: string
+}): React.JSX.Element {
+  const ref = useRef<HTMLInputElement>(null)
+
+  // 外部值变化（如 store 刷新）时同步 DOM；聚焦拖动中不打断用户
+  useEffect(() => {
+    const el = ref.current
+    if (el && document.activeElement !== el) {
+      el.value = String(value)
+    }
+  }, [value])
+
+  // 原生 input 事件直连（不依赖 React 合成事件）
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const onInput = (): void => {
+      onChange(Number(el.value))
+    }
+    el.addEventListener('input', onInput)
+    return () => el.removeEventListener('input', onInput)
+  }, [onChange])
+
+  return (
+    <input
+      ref={ref}
+      type="range"
+      min={min}
+      max={max}
+      defaultValue={value}
+      className={className}
+      title={title}
+    />
   )
 }

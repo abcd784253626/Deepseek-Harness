@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Palette, Download, Upload, Trash2, Check, Plus, Monitor } from 'lucide-react'
 import { useApp } from '../stores/app'
 import { applyThemeToDocument, tokensToVars } from '../lib/theme'
-import { Badge, Button, Segmented, Switch } from '../components/ui'
+import { Badge, Button, RangeSlider, Segmented, Switch } from '../components/ui'
 import type { ThemeDefinition, ThemeTokens } from '@shared/types'
 
 const TOKEN_META: Array<{ key: keyof ThemeTokens; label: string }> = [
@@ -253,25 +253,22 @@ export function ThemesPage(): React.JSX.Element {
               <span className="text-[12px] font-medium fg-2">形状与排版</span>
               <div className="flex items-center gap-3">
                 <span className="w-20 shrink-0 text-[12px] fg-2">圆角</span>
-                <input
-                  type="range"
+                <RangeSlider
                   min={0}
                   max={24}
                   value={draft.tokens.radius}
-                  onChange={(e) => patchDraft({ radius: Number(e.target.value) })}
+                  onChange={(v) => patchDraft({ radius: v })}
                   className="flex-1 accent-[var(--accent)]"
                 />
                 <span className="w-12 text-[12px] font-mono fg-2">{draft.tokens.radius}px</span>
               </div>
               <div className="flex items-center gap-3">
                 <span className="w-20 shrink-0 text-[12px] fg-2">基准字号</span>
-                <input
-                  type="range"
+                <RangeSlider
                   min={12}
                   max={18}
-                  step={1}
                   value={draft.tokens.fontSize}
-                  onChange={(e) => patchDraft({ fontSize: Number(e.target.value) })}
+                  onChange={(v) => patchDraft({ fontSize: v })}
                   className="flex-1 accent-[var(--accent)]"
                 />
                 <span className="w-12 text-[12px] font-mono fg-2">{draft.tokens.fontSize}px</span>

@@ -17,7 +17,7 @@ import {
   Rocket
 } from 'lucide-react'
 import { useApp } from '../stores/app'
-import { Badge, Button, Segmented, Switch } from '../components/ui'
+import { Badge, Button, RangeSlider, Segmented, Switch } from '../components/ui'
 import type { CredentialEntry, WallpaperInfo } from '@shared/types'
 
 interface UpdateInfo {
@@ -49,6 +49,7 @@ export function SettingsPage(): React.JSX.Element {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateLog, setUpdateLog] = useState<string[]>([])
+  const [updating, setUpdating] = useState(false)
 
   useEffect(() => {
     void window.dsh.credentials.list().then(setCredentials)
@@ -56,13 +57,20 @@ export function SettingsPage(): React.JSX.Element {
   }, [settings])
 
   const addCredential = async (): Promise<void> => {
-    if (!key.trim() || !secret) return
-    await window.dsh.credentials.set(key.trim(), label.trim() || key.trim(), secret)
-    setKey('')
-    setLabel('')
-    setSecret('')
-    setNotice('凭据已加密保存（Windows DPAPI）')
-    void window.dsh.credentials.list().then(setCredentials)
+    if (!key.trim() || !secret) {
+      setNotice('请填写键名与密钥值')
+      return
+    }
+    try {
+      const entry = await window.dsh.credentials.set(key.trim(), label.trim() || key.trim(), secret)
+      setKey('')
+      setLabel('')
+      setSecret('')
+      setNotice(`凭据「${entry.key}」已加密保存（Windows DPAPI）`)
+      setCredentials(await window.dsh.credentials.list())
+    } catch (err) {
+      setNotice(`保存失败：${(err as Error).message.replace(/^Error invoking remote method '[^']+':\s*/, '')}`)
+    }
   }
 
   const wallpaperSrc = (path: string): string => `dsh-img://local/${encodeURIComponent(path).replace(/%2F/gi, '/')}`
@@ -101,24 +109,32 @@ export function SettingsPage(): React.JSX.Element {
   }
 
   const runUpdate = async (): Promise<void> => {
+    if (updating) return
+    setUpdating(true)
     setUpdateLog([])
     setNotice(null)
-    const session = await window.dsh.terminal.run(['dsh', '--version'], '')
     const offOut = window.dsh.terminal.onOutput((o) => {
-      if (o.sessionId !== session.id) setUpdateLog((prev) => [...prev.slice(-80), o.text])
+      setUpdateLog((prev) => [...prev.slice(-80), o.text])
     })
-    const offExit = window.dsh.terminal.onExit(async (o) => {
-      if (o.sessionId !== session.id) return
-      offOut()
-      offExit()
+    const offExit = window.dsh.terminal.onExit((o) => {
       setUpdateLog((prev) => [...prev, `[更新进程结束 exit=${o.exitCode}]`])
       if (o.exitCode === 0) {
         setNotice('内核更新完成，请重启 DSH Desktop 后生效')
         void checkUpdate()
       }
+      setUpdating(false)
+      offOut()
+      offExit()
     })
-    const s = await window.dsh.terminal.run(['npm', 'install', '-g', '@deepseek-ai/dsh@latest'], '')
-    setUpdateLog((prev) => [...prev, `npm install -g @deepseek-ai/dsh@latest (session ${s.id})`])
+    try {
+      const s = await window.dsh.terminal.run(['npm', 'install', '-g', '@deepseek-ai/dsh@latest'], '')
+      setUpdateLog((prev) => [...prev, `> npm install -g @deepseek-ai/dsh@latest (session ${s.id})`])
+    } catch (err) {
+      setUpdateLog((prev) => [...prev, `启动更新失败：${(err as Error).message}`])
+      setUpdating(false)
+      offOut()
+      offExit()
+    }
   }
 
   return (
@@ -198,12 +214,13 @@ export function SettingsPage(): React.JSX.Element {
               <div className="truncate font-mono text-[11px] fg-3">{currentWallpaper}</div>
               <div className="mt-1 flex items-center gap-2">
                 <span className="text-[11px] fg-2">不透明度</span>
-                <input
-                  type="range"
+                <RangeSlider
                   min={5}
                   max={100}
                   value={settings?.wallpaperOpacity ?? 40}
-                  onChange={(e) => void window.dsh.wallpaper.opacity(Number(e.target.value)).then(() => void saveSettings({ wallpaperOpacity: Number(e.target.value) }))}
+                  onChange={(v) => {
+                    void window.dsh.wallpaper.opacity(v).then(() => void saveSettings({ wallpaperOpacity: v }))
+                  }}
                   className="w-32 accent-[var(--accent)]"
                 />
                 <span className="text-[11px] font-mono fg-2">{settings?.wallpaperOpacity ?? 40}%</span>
@@ -304,8 +321,8 @@ export function SettingsPage(): React.JSX.Element {
               <Button small disabled={updateChecking} onClick={() => void checkUpdate()}>
                 <RefreshCw size={12} /> {updateChecking ? '检查中…' : '检查更新'}
               </Button>
-              <Button small variant="primary" disabled={!updateInfo?.outdated} onClick={() => void runUpdate()}>
-                <Rocket size={12} /> 一键更新内核
+              <Button small variant="primary" disabled={!updateInfo?.outdated || updating} onClick={() => void runUpdate()}>
+                <Rocket size={12} /> {updating ? '更新中…' : '一键更新内核'}
               </Button>
               <Button small onClick={() => void window.dsh.app.openExternal('https://github.com/deepseek-ai/deepseek-harness/releases')}>
                 官方更新日志

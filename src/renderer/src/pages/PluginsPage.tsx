@@ -52,20 +52,37 @@ function RiskBadges({ plugin }: { plugin: RegistryPlugin }): React.JSX.Element {
 
 export function PluginsPage(): React.JSX.Element {
   const { market, installed, query, category, sort, loading, error, search, setQuery, setCategory, setSort, refreshInstalled } = usePlugins()
-  const categories = useApp((s) => s.appInfo) ? undefined : undefined
   const [tab, setTab] = useState<'market' | 'installed'>('market')
   const [detail, setDetail] = useState<{ name: string; data: PluginDetail | null } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [opLog, setOpLog] = useState<string | null>(null)
+  // 安装任务进度：{ name, phase, status } 队列，running 显示横幅，终态 4 秒后消失
+  const [tasks, setTasks] = useState<Array<{ name: string; phase: string; status: string; at: number }>>([])
 
   useEffect(() => {
     void search()
     void refreshInstalled()
     return window.dsh.plugins.onOp((op) => {
+      setTasks((prev) => {
+        const idx = prev.findIndex((t) => t.name === op.name && t.phase === op.phase)
+        const next = [...prev]
+        if (idx >= 0) next[idx] = { name: op.name, phase: op.phase, status: op.status, at: Date.now() }
+        else next.push({ name: op.name, phase: op.phase, status: op.status, at: Date.now() })
+        return next.slice(-5)
+      })
       setOpLog(`${op.phase} ${op.name}: ${op.status === 'running' ? '进行中…' : op.status === 'done' ? '完成' : '失败'}`)
     })
   }, [search, refreshInstalled])
+
+  // 终态任务自动清除
+  useEffect(() => {
+    if (!tasks.some((t) => t.status !== 'running')) return
+    const timer = setTimeout(() => {
+      setTasks((prev) => prev.filter((t) => t.status === 'running' || Date.now() - t.at < 4000))
+    }, 4000)
+    return () => clearTimeout(timer)
+  }, [tasks])
 
   const categoryLabels: Record<string, string> = {
     all: '全部',
@@ -139,6 +156,35 @@ export function PluginsPage(): React.JSX.Element {
           <RefreshCw size={12} />
         </Button>
       </div>
+
+      {/* 安装任务进度横幅 */}
+      {tasks.length > 0 && (
+        <div className="flex shrink-0 flex-col gap-1 border-b px-4 py-2" style={{ borderColor: 'var(--border)', background: 'var(--bg-subtle)' }}>
+          {tasks.map((t, i) => (
+            <div key={`${t.name}-${t.phase}-${i}`} className="flex items-center gap-2 text-[12px]">
+              {t.status === 'running' ? (
+                <>
+                  <span className="h-2.5 w-2.5 animate-spin rounded-full border-[2px]" style={{ borderColor: 'var(--border)', borderTopColor: 'var(--accent)' }} />
+                  <span style={{ color: 'var(--fg)' }}>{t.name}</span>
+                  <span className="fg-3">{t.phase === 'install' ? '安装中（pnpm 解析依赖可能需要一点时间）…' : `${t.phase}中…`}</span>
+                </>
+              ) : t.status === 'done' ? (
+                <>
+                  <span style={{ color: 'var(--success)' }}>✓</span>
+                  <span style={{ color: 'var(--fg)' }}>{t.name}</span>
+                  <span className="fg-3">{t.phase}完成，内核将自动重启生效</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: 'var(--danger)' }}>✗</span>
+                  <span style={{ color: 'var(--fg)' }}>{t.name}</span>
+                  <span className="fg-3">{t.phase}失败，查看下方日志</span>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {notice && (
         <div className="border-b px-4 py-2 text-[12px]" style={{ borderColor: 'var(--border)', color: notice.startsWith('失败') || notice.includes('失败') ? 'var(--danger)' : 'var(--success)' }}>

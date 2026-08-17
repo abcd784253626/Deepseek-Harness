@@ -12,7 +12,7 @@ import { lstatSync, readFileSync } from 'node:fs'
 import { dirname, normalize, sep } from 'node:path'
 import { extOf, IMAGE_EXTS, formatOf } from './image-meta'
 import { getSettings, listWorkspaces } from '../store/database'
-import { defaultImageDirs } from './scanner'
+import { defaultImageDirs, listLocalDrives } from './scanner'
 
 const MAX_SERVE_BYTES = 50 * 1024 * 1024
 
@@ -31,7 +31,7 @@ export function invalidateImageAllowlist(): void {
   allowlistCache = null
 }
 
-function allowedRoots(): string[] {
+async function allowedRoots(): Promise<string[]> {
   if (allowlistCache) return allowlistCache
   const roots = new Set<string>()
   const settings = getSettings()
@@ -46,13 +46,22 @@ function allowedRoots(): string[] {
     roots.add(ws.path)
     if (ws.dshHome) roots.add(ws.dshHome)
   }
+  // 4. 全部本地固定盘根：壁纸搜索覆盖全盘，扫描结果缩略图必须可预览。
+  //    协议仍有魔数复核 + 扩展名白名单 + 符号链接拒绝 + 大小上限四重防线，
+  //    目录白名单仅作为纵深防御层。
+  try {
+    const drives = await listLocalDrives()
+    for (const drive of drives) roots.add(drive)
+  } catch {
+    /* 盘符枚举失败不阻塞 */
+  }
   allowlistCache = [...roots]
   return allowlistCache
 }
 
-function isAllowedPath(filePath: string): boolean {
+async function isAllowedPath(filePath: string): Promise<boolean> {
   const normalized = normalize(filePath).toLowerCase()
-  for (const root of allowedRoots()) {
+  for (const root of await allowedRoots()) {
     const r = normalize(root).toLowerCase().replace(/[\\/]+$/, '')
     if (normalized === r || normalized.startsWith(r + sep)) return true
   }
@@ -81,7 +90,7 @@ export function registerImageProtocol(): void {
         return new Response('forbidden', { status: 403 })
       }
       // 3) 路径白名单
-      if (!isAllowedPath(filePath)) {
+      if (!(await isAllowedPath(filePath))) {
         return new Response('forbidden', { status: 403 })
       }
       // 4) 文件头魔数复核（扩展名伪装 / 非图片内容一律拒绝）

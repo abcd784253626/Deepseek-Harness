@@ -66,6 +66,13 @@ body,
 .btn-pill:disabled:hover { background: transparent; }
 .btn-pill.primary { background: var(--accent); color: var(--accent-fg); }
 .btn-pill.primary:hover { opacity: 0.88; }
+/* 禁用态 primary：灰底 + 灰字，hover 不再变透明（否则白字配透明底=字消失） */
+.btn-pill.primary:disabled,
+.btn-pill.primary:disabled:hover {
+  background: var(--bg-subtle);
+  color: var(--fg-3);
+  opacity: 1;
+}
 .btn-pill.danger { color: var(--danger); }
 .btn-pill.danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .btn-pill.sm { padding: 3px 10px; font-size: 12px; }
