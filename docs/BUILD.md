@@ -46,6 +46,34 @@ electron-builder 配置（package.json `build` 字段）要点：
 - NSIS：可选安装目录、桌面+开始菜单快捷方式、卸载程序
 - 图标：`resources/icon.ico`（scripts/generate-icon.ps1 生成，PNG-in-ICO 格式）
 
+## 版本发布规范（GitHub Release）
+
+**规则：每次发布使用新版本号，历史 Release 永不修改。**
+
+```powershell
+# 1. 升版本号（语义化版本：修复 bug 升 patch，新功能升 minor）
+#    package.json 的 "version" 字段 → 如 0.1.1 → 0.1.2
+
+# 2. 构建 + 打包（产物名自动带新版本号）
+npm run build
+npm run package:all
+
+# 3. 提交 + 打标签 + 推送
+git add -A && git commit -m "release: v0.1.2 ..."
+git push origin main
+git tag -a v0.1.2 -m "DSH Desktop v0.1.2 ..."
+git push origin v0.1.2
+
+# 4. 发布（脚本自动读 package.json 版本，创建新 tag 的独立 Release 并上传）
+#    需要 GitHub 凭据（GCM 已配置）
+node scripts/github-release.js
+```
+
+发布脚本要点（scripts/github-release.js）：
+- tag 默认取 `package.json` 的 version（也可 `node scripts/github-release.js v0.1.2` 显式指定）
+- 每次为**新 tag 创建新 Release**，资产名带版本号（`DSH-Desktop-<version>-x64.exe`），与历史 Release 天然隔离
+- 上传带 10 分钟超时 + 5 次自动重试（大文件网络波动）
+
 ### 打包常见问题
 
 | 问题 | 处理 |
