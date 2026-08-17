@@ -1,5 +1,7 @@
 # DSH Desktop
 
+> deepseek-harness 桌面版，内置市场插件一系列的内容，小白能轻易上手。
+
 基于官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT）封装的 **Windows 原生桌面客户端**。
 保留官方全部 Agent 能力，无浏览器运行；额外提供 **插件安装市场** 与 **皮肤自定义系统**，遵循 Codex 级极简设计语言。
 
