@@ -1,6 +1,8 @@
 /**
- * 创建 GitHub Release 并上传安装包资产
- * 用法: node scripts/github-release.js
+ * 创建/更新 GitHub Release 并上传安装包资产
+ * 用法: node scripts/github-release.js [tag]
+ *   tag 缺省时取 package.json 的 version（推荐：每次发版先升版本号再执行）
+ * 规则：每个版本号对应独立 tag 与独立 Release，历史 Release 永不修改
  * 环境: GH_TOKEN（GCM 提取的 PAT）
  */
 const fs = require('node:fs')
@@ -8,7 +10,9 @@ const path = require('node:path')
 
 const OWNER = 'abcd784253626'
 const REPO = 'Deepseek-Harness'
-const TAG = 'v0.1.0'
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'))
+const VERSION = pkg.version
+const TAG = process.argv[2] ? process.argv[2].replace(/^v/, 'v') : `v${VERSION}`
 const TOKEN = process.env.GH_TOKEN
 if (!TOKEN) {
   console.error('缺少 GH_TOKEN')
@@ -43,20 +47,20 @@ async function main() {
       headers: { ...H, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tag_name: TAG,
-        name: 'DSH Desktop v0.1.0',
+        name: `DSH Desktop ${TAG}`,
         body: [
-          '## DSH Desktop v0.1.0 — DeepSeek Harness Windows 桌面客户端',
+          `## DSH Desktop ${TAG} — DeepSeek Harness Windows 桌面客户端`,
           '',
           '- 基于官方 DeepSeek Harness（MIT）封装的 Windows 原生桌面应用，无浏览器运行',
           '- 插件安装市场（GitHub topic + npm 双源、一键装卸、版本回滚、安全扫描）',
           '- 皮肤系统（3 套预设 + 可视化编辑器 + .dsh-theme 导入导出 + 自定义 CSS）',
-          '- 壁纸系统（本地磁盘图片搜索、全格式识别）',
+          '- 壁纸系统（本地磁盘图片搜索、全格式识别、透明度调节）',
           '- 官方版本实时更新检查、API 凭据本地加密存储',
           '- 完整架构文档：docs/（架构 / 构建 / 插件开发 / 主题开发）',
           '',
           '### 安装说明',
-          '- `DSH-Desktop-0.1.0-x64.exe`：NSIS 安装包（请复制到纯英文路径后运行，见 BUILD.md）',
-          '- `DSH-Desktop-0.1.0-portable-x64.exe`：便携版，解压即用（中文路径可直接运行）',
+          `- \`DSH-Desktop-${VERSION}-x64.exe\`：NSIS 安装包（请复制到纯英文路径后运行，见 BUILD.md）`,
+          `- \`DSH-Desktop-${VERSION}-portable-x64.exe\`：便携版，解压即用（中文路径可直接运行）`,
           '- 前置要求：Node.js 18+、`npm install -g @deepseek-ai/dsh`、pnpm'
         ].join('\n')
       })
@@ -69,10 +73,10 @@ async function main() {
   }
   console.log('Release:', release.html_url)
 
-  // 2. 上传资产
+  // 2. 上传资产（资产名带版本号，历史 Release 天然互不冲突）
   const assets = [
-    { file: 'release/DSH-Desktop-0.1.0-x64.exe', name: 'DSH-Desktop-0.1.0-x64.exe' },
-    { file: 'release/DSH-Desktop-0.1.0-portable-x64.exe', name: 'DSH-Desktop-0.1.0-portable-x64.exe' }
+    { file: `release/DSH-Desktop-${VERSION}-x64.exe`, name: `DSH-Desktop-${VERSION}-x64.exe` },
+    { file: `release/DSH-Desktop-${VERSION}-portable-x64.exe`, name: `DSH-Desktop-${VERSION}-portable-x64.exe` }
   ]
   for (const asset of assets) {
     const filePath = path.join(__dirname, '..', asset.file)
