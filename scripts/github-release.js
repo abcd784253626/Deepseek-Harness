@@ -66,11 +66,15 @@ async function main() {
       console.warn('跳过缺失资产:', asset.file)
       continue
     }
-    // 跳过已存在的同名资产
+    // 删除同名旧资产后重新上传（保证 release 资产与本地一致）
     const existing = await fetch(`${API}/releases/${release.id}/assets`, { headers: H }).then((r) => r.json())
-    if (Array.isArray(existing) && existing.some((a) => a.name === asset.name)) {
-      console.log('已存在，跳过:', asset.name)
-      continue
+    if (Array.isArray(existing)) {
+      for (const a of existing) {
+        if (a.name === asset.name) {
+          console.log('删除旧资产:', asset.name)
+          await fetch(`${API}/releases/assets/${a.id}`, { method: 'DELETE', headers: H })
+        }
+      }
     }
     const data = fs.readFileSync(filePath)
     console.log(`上传 ${asset.name} (${(data.length / 1024 / 1024).toFixed(1)}MB)...`)

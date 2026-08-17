@@ -18,7 +18,33 @@ if (!gotLock) {
   app.quit()
 } else {
   registerImageProtocolScheme()
+  installGlobalErrorHandlers()
   bootstrap()
+}
+
+/**
+ * 全局异常兜底：Electron 主进程默认对 uncaughtException 弹错误对话框。
+ * 桌面应用生命周期竞态（Tray/窗口销毁时序等）不应打断用户，统一记录到
+ * 控制台/日志并继续运行。
+ */
+function installGlobalErrorHandlers(): void {
+  process.on('uncaughtException', (err) => {
+    try {
+      console.error('[dsh-desktop] uncaughtException:', err?.stack ?? String(err))
+    } catch {
+      /* 日志失败忽略 */
+    }
+  })
+  process.on('unhandledRejection', (reason) => {
+    try {
+      console.error(
+        '[dsh-desktop] unhandledRejection:',
+        reason instanceof Error ? reason.stack ?? reason.message : String(reason)
+      )
+    } catch {
+      /* 日志失败忽略 */
+    }
+  })
 }
 
 let isQuitting = false
