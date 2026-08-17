@@ -83,7 +83,10 @@ const DEFAULT_SETTINGS: DesktopSettings = {
   dshHomeOverride: '',
   lastWorkspaceId: '',
   lastMode: 'standard',
-  customCss: ''
+  customCss: '',
+  wallpaperPath: '',
+  wallpaperOpacity: 40,
+  openAtLogin: false
 }
 
 export function getSettings(): DesktopSettings {

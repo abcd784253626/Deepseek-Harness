@@ -144,3 +144,36 @@ webview {
   border: none;
   background: var(--bg);
 }
+
+/* ─── 壁纸层 ──────────────────────────────────────────────── */
+.wallpaper-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+.wallpaper-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--bg);
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.wallpaper-content {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+}
+/* 有壁纸时让壳层半透明，露出背景 */
+body.has-wallpaper .app-sidebar,
+body.has-wallpaper .titlebar-bg {
+  background: color-mix(in srgb, var(--bg) 86%, transparent) !important;
+  backdrop-filter: blur(6px);
+}
+body.has-wallpaper .app-page-bg {
+  background: transparent !important;
+}

@@ -19,6 +19,7 @@ import type {
   RegistryPlugin,
   TerminalSession,
   ThemeDefinition,
+  WallpaperInfo,
   WorkspaceInfo
 } from '@shared/types'
 
@@ -39,6 +40,8 @@ const api = {
       send(IPC.app.pickFile, filters) as Promise<string | null>,
     saveFile: (opts: { defaultName: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> =>
       send(IPC.app.saveFile, opts) as Promise<string | null>,
+    setOpenAtLogin: (enabled: boolean): Promise<boolean> =>
+      send(IPC.app.setOpenAtLogin, enabled) as Promise<boolean>,
     onMaximized: (cb: (max: boolean) => void): (() => void) => {
       const listener = (_e: Electron.IpcRendererEvent, max: boolean): void => cb(max)
       ipcRenderer.on('window:maximized', listener)
@@ -118,6 +121,30 @@ const api = {
   config: {
     export: (): Promise<string | null> => send(IPC.config.export) as Promise<string | null>,
     import: (): Promise<{ file: string; backup: string } | null> => send(IPC.config.import) as Promise<{ file: string; backup: string } | null>
+  },
+  wallpaper: {
+    search: (roots?: string[]): Promise<WallpaperInfo[]> => send(IPC.wallpaper.search, roots) as Promise<WallpaperInfo[]>,
+    set: (path: string): Promise<string> => send(IPC.wallpaper.set, path) as Promise<string>,
+    get: (): Promise<string> => send(IPC.wallpaper.get) as Promise<string>,
+    clear: (): Promise<DesktopSettings> => send(IPC.wallpaper.clear) as Promise<DesktopSettings>,
+    opacity: (opacity: number): Promise<number> => send(IPC.wallpaper.opacity, opacity) as Promise<number>,
+    onProgress: (cb: (p: { scanned: number; found: number; currentDir: string }) => void): (() => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, p: { scanned: number; found: number; currentDir: string }): void => cb(p)
+      ipcRenderer.on(IPC.wallpaper.onProgress, listener)
+      return () => ipcRenderer.removeListener(IPC.wallpaper.onProgress, listener)
+    }
+  },
+  update: {
+    check: (): Promise<{ local: string | null; latest: string | null; outdated: boolean; publishedAt: string | null; error: string | null }> =>
+      send(IPC.update.check) as Promise<{ local: string | null; latest: string | null; outdated: boolean; publishedAt: string | null; error: string | null }>
+  },
+  aliyun: {
+    get: (): Promise<{ config: { enabled: boolean; apiKeyId: string; model: string; modelLabel: string }; models: Array<{ id: string; name: string }> }> =>
+      send(IPC.aliyun.get) as Promise<{ config: { enabled: boolean; apiKeyId: string; model: string; modelLabel: string }; models: Array<{ id: string; name: string }> }>,
+    save: (apiKey: string | null, model: string): Promise<{ enabled: boolean; apiKeyId: string; model: string; modelLabel: string }> =>
+      send(IPC.aliyun.save, apiKey, model) as Promise<{ enabled: boolean; apiKeyId: string; model: string; modelLabel: string }>,
+    test: (model: string): Promise<{ ok: boolean; latencyMs: number; model: string; reply: string | null; error: string | null }> =>
+      send(IPC.aliyun.test, model) as Promise<{ ok: boolean; latencyMs: number; model: string; reply: string | null; error: string | null }>
   },
   terminal: {
     run: (args: string[], cwd: string): Promise<TerminalSession> => send(IPC.terminal.run, args, cwd) as Promise<TerminalSession>,

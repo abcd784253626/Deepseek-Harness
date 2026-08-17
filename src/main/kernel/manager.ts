@@ -18,6 +18,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { KernelLogLevel, KernelLogLine, KernelState, KernelStatus, WorkspaceInfo } from '@shared/types'
 import { getSettings, getWorkspace } from '../store/database'
+import { readCredential, listCredentials } from '../security'
 import { resolveDsh, resolveSystemNode } from './resolver'
 
 const MAX_LOG_LINES = 2000
@@ -212,23 +213,41 @@ export class KernelManager extends EventEmitter {
     this.log('info', `工作区: ${cwd}`)
     this.log('info', `DSH_HOME: ${dshHome}`)
 
+    // 从本地加密库注入模型凭据（DPAPI 解密 → 仅进入子进程环境变量，不外泄）
+    const envExtra: Record<string, string> = {}
+    for (const entry of listCredentials()) {
+      const value = readCredential(entry.key)
+      if (value) envExtra[entry.key] = value
+    }
+    this.log('info', `注入模型凭据: ${Object.keys(envExtra).join(', ') || '无'}`)
+
     // 系统 Node + bin.js：与官方 CLI 运行方式完全一致
-    const child = spawn(
-      binary.viaPath ? binary.path : nodePath,
-      binary.viaPath ? ['--profile', 'web', '--host', '127.0.0.1', '--port', String(port)] : [binary.path, '--profile', 'web', '--host', '127.0.0.1', '--port', String(port)],
-      {
-        cwd,
-        env: {
-          ...process.env,
-          DSH_HOME: dshHome,
-          FORCE_COLOR: '0',
-          NO_COLOR: '1'
-        },
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        ...(binary.viaPath ? { shell: true } : {})
-      }
-    )
+    let child: ChildProcess
+    try {
+      child = spawn(
+        binary.viaPath ? binary.path : nodePath,
+        binary.viaPath ? ['--profile', 'web', '--host', '127.0.0.1', '--port', String(port)] : [binary.path, '--profile', 'web', '--host', '127.0.0.1', '--port', String(port)],
+        {
+          cwd,
+          env: {
+            ...process.env,
+            ...envExtra,
+            DSH_HOME: dshHome,
+            FORCE_COLOR: '0',
+            NO_COLOR: '1'
+          },
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          ...(binary.viaPath ? { shell: true } : {})
+        }
+      )
+    } catch (err) {
+      this.lastError = `spawn 失败: ${(err as Error).message}`
+      this.log('error', this.lastError)
+      this.setStatus('error')
+      return this.getState()
+    }
+    this.log('debug', `[dbg] spawn 成功 pid=${child.pid}`)
     this.child = child
 
     child.stdout?.on('data', (chunk: Buffer) => {

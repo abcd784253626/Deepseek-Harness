@@ -188,6 +188,12 @@ export interface DesktopSettings {
   lastMode: AgentMode
   /** 全局自定义 CSS 注入（叠加在主题之上） */
   customCss: string
+  /** 壁纸图片路径（空 = 无壁纸） */
+  wallpaperPath: string
+  /** 壁纸不透明度 0-100 */
+  wallpaperOpacity: number
+  /** 开机自启 */
+  openAtLogin: boolean
 }
 
 // ─── 凭据（API Key，经 safeStorage 加密） ──────────────────────
@@ -211,6 +217,20 @@ export interface TerminalSession {
   exitCode: number | null
 }
 
+// ─── 壁纸 ────────────────────────────────────────────────────
+
+export type ImageFormat = 'jpeg' | 'png' | 'gif' | 'bmp' | 'webp' | 'tiff' | 'ico'
+
+export interface WallpaperInfo {
+  path: string
+  name: string
+  sizeBytes: number
+  modifiedAt: number
+  format: ImageFormat
+  width: number | null
+  height: number | null
+}
+
 // ─── IPC 通道常量 ─────────────────────────────────────────────
 
 export const IPC = {
@@ -224,7 +244,8 @@ export const IPC = {
     showItemInFolder: 'app:show-item-in-folder',
     pickDirectory: 'app:pick-directory',
     pickFile: 'app:pick-file',
-    saveFile: 'app:save-file'
+    saveFile: 'app:save-file',
+    setOpenAtLogin: 'app:set-open-at-login'
   },
   kernel: {
     start: 'kernel:start',
@@ -282,6 +303,22 @@ export const IPC = {
   config: {
     export: 'config:export',
     import: 'config:import'
+  },
+  wallpaper: {
+    search: 'wallpaper:search',
+    set: 'wallpaper:set',
+    get: 'wallpaper:get',
+    clear: 'wallpaper:clear',
+    opacity: 'wallpaper:opacity',
+    onProgress: 'wallpaper:on-progress'
+  },
+  update: {
+    check: 'update:check'
+  },
+  aliyun: {
+    save: 'aliyun:save',
+    test: 'aliyun:test',
+    get: 'aliyun:get'
   },
   terminal: {
     run: 'terminal:run',

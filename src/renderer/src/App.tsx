@@ -1,7 +1,7 @@
 /**
  * 应用壳：主题应用 + 布局（标题栏/侧边栏/页面区）+ 命令面板
  */
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useApp } from './stores/app'
 import { applyThemeToDocument } from './lib/theme'
 import { TitleBar } from './components/TitleBar'
@@ -20,6 +20,7 @@ export default function App(): React.JSX.Element {
   const immersive = useApp((s) => s.immersive)
   const activeTheme = useApp((s) => s.activeTheme)
   const customCss = useApp((s) => s.customCss)
+  const settings = useApp((s) => s.settings)
 
   useEffect(() => {
     void useApp.getState().bootstrap()
@@ -29,6 +30,18 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (activeTheme) applyThemeToDocument(activeTheme, customCss)
   }, [activeTheme, customCss])
+
+  // 壁纸背景
+  const wallpaperUrl = useMemo(() => {
+    const path = settings?.wallpaperPath
+    if (!path) return null
+    return `url(dsh-img://local/${encodeURIComponent(path).replace(/%2F/gi, '/')})`
+  }, [settings?.wallpaperPath])
+
+  useEffect(() => {
+    document.body.classList.toggle('has-wallpaper', Boolean(wallpaperUrl))
+    return () => document.body.classList.remove('has-wallpaper')
+  }, [wallpaperUrl])
 
   if (!ready) {
     return (
@@ -41,21 +54,31 @@ export default function App(): React.JSX.Element {
     )
   }
 
+  const maskOpacity = wallpaperUrl ? (100 - (settings?.wallpaperOpacity ?? 40)) / 100 : 1
+
   return (
-    <div className={`flex h-full flex-col ${immersive ? 'immersive' : ''}`}>
-      <TitleBar />
-      <div className="flex min-h-0 flex-1">
-        <Sidebar />
-        <main className="min-w-0 flex-1" style={{ background: 'var(--bg)' }}>
-          {page === 'chat' && <ChatPage />}
-          {page === 'plugins' && <PluginsPage />}
-          {page === 'themes' && <ThemesPage />}
-          {page === 'terminal' && <TerminalPage />}
-          {page === 'workspaces' && <WorkspacesPage />}
-          {page === 'settings' && <SettingsPage />}
-        </main>
+    <div className={`relative flex h-full flex-col ${immersive ? 'immersive' : ''}`}>
+      {wallpaperUrl && (
+        <>
+          <div className="wallpaper-layer" style={{ backgroundImage: wallpaperUrl }} />
+          <div className="wallpaper-mask" style={{ opacity: maskOpacity }} />
+        </>
+      )}
+      <div className="wallpaper-content flex flex-col">
+        <TitleBar />
+        <div className="flex min-h-0 flex-1">
+          <Sidebar />
+          <main className="app-page-bg min-w-0 flex-1" style={{ background: 'var(--bg)' }}>
+            {page === 'chat' && <ChatPage />}
+            {page === 'plugins' && <PluginsPage />}
+            {page === 'themes' && <ThemesPage />}
+            {page === 'terminal' && <TerminalPage />}
+            {page === 'workspaces' && <WorkspacesPage />}
+            {page === 'settings' && <SettingsPage />}
+          </main>
+        </div>
+        <CommandPalette />
       </div>
-      <CommandPalette />
     </div>
   )
 }

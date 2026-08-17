@@ -6,6 +6,7 @@
  */
 import { app, BrowserWindow } from 'electron'
 import { registerIpc } from './ipc'
+import { registerImageProtocol, registerImageProtocolScheme } from './wallpaper/protocol'
 import { createMainWindow, getMainWindow, destroyMainWindow, requestClose } from './window'
 import { installMenu } from './menu'
 import { installTray, destroyTray } from './tray'
@@ -16,6 +17,7 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
+  registerImageProtocolScheme()
   bootstrap()
 }
 
@@ -35,6 +37,7 @@ function bootstrap(): void {
   app.whenReady().then(async () => {
     installMenu()
     registerIpc()
+    registerImageProtocol()
     createMainWindow()
     installTray()
 
@@ -51,7 +54,10 @@ function bootstrap(): void {
   })
   getMainWindowProxyClose()
 
+  // before-quit 先于窗口 close 触发：置位退出标志，让 close 拦截放行（否则
+  // minimizeToTray=true 时 app.quit() 会被 close 拦截变成"隐藏到托盘"）
   app.on('before-quit', () => {
+    isQuitting = true
     kernelManager.dispose()
     destroyTray()
   })

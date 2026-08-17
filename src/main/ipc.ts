@@ -42,6 +42,15 @@ import {
 import { terminalRunner } from './terminal/runner'
 import { getMainWindow, toggleMaximize, minimizeWindow, requestClose, isMaximized } from './window'
 import { homedir } from 'node:os'
+import { scanForImages, listLocalDrives, defaultImageDirs } from './wallpaper/scanner'
+import { checkDshUpdate } from './updates'
+import {
+  getAliyunConfig,
+  saveAliyunConfig,
+  testAliyunConnection,
+  ALIYUN_MODELS
+} from './aliyun'
+import { getSettings as getSettingsStore } from './store/database'
 
 export function registerIpc(): void {
   const wc = (): Electron.WebContents | null => getMainWindow()?.webContents ?? null
@@ -290,6 +299,51 @@ export function registerIpc(): void {
     if (existsSync(join(home, 'settings.yaml'))) copyFileSync(join(home, 'settings.yaml'), backup)
     copyFileSync(result.filePaths[0], join(home, 'settings.yaml'))
     return { file: result.filePaths[0], backup }
+  })
+
+  // ─── 壁纸 ────────────────────────────────────────────────
+  ipcMain.handle(IPC.wallpaper.search, async (_e, roots?: string[]) => {
+    const effective = roots?.length ? roots : await defaultImageDirs().length ? defaultImageDirs() : await listLocalDrives()
+    const result = await scanForImages(
+      { roots: effective },
+      (progress) => wc()?.send(IPC.wallpaper.onProgress, progress)
+    )
+    return result
+  })
+  ipcMain.handle(IPC.wallpaper.set, (_e, path: string) => {
+    const { statSync } = require('node:fs') as typeof import('node:fs')
+    if (!path || !statSync(path).isFile()) throw new Error('无效的图片路径')
+    patchSettings({ wallpaperPath: path })
+    return getSettingsStore().wallpaperPath
+  })
+  ipcMain.handle(IPC.wallpaper.get, () => getSettings().wallpaperPath)
+  ipcMain.handle(IPC.wallpaper.clear, () => patchSettings({ wallpaperPath: '' }))
+  ipcMain.handle(IPC.wallpaper.opacity, (_e, opacity: number) => {
+    const clamped = Math.max(0, Math.min(100, Number(opacity) || 0))
+    patchSettings({ wallpaperOpacity: clamped })
+    return clamped
+  })
+
+  // ─── 官方版本更新检查 ────────────────────────────────────
+  ipcMain.handle(IPC.update.check, () => {
+    const settings = getSettings()
+    const binary = resolveDsh(settings.dshPathOverride)
+    return checkDshUpdate(binary?.version ?? null)
+  })
+
+  // ─── 阿里百炼 ────────────────────────────────────────────
+  ipcMain.handle(IPC.aliyun.get, () => ({ config: getAliyunConfig(), models: ALIYUN_MODELS }))
+  ipcMain.handle(IPC.aliyun.save, (_e, apiKey: string | null, model: string) => {
+    if (!ALIYUN_MODELS.some((m) => m.id === model)) throw new Error('未知模型')
+    return saveAliyunConfig(apiKey?.trim() || null, model)
+  })
+  ipcMain.handle(IPC.aliyun.test, (_e, model: string) => testAliyunConnection(model))
+
+  // ─── 开机自启 ────────────────────────────────────────────
+  ipcMain.handle(IPC.app.setOpenAtLogin, (_e, enabled: boolean) => {
+    app.setLoginItemSettings({ openAtLogin: enabled })
+    patchSettings({ openAtLogin: enabled })
+    return enabled
   })
 
   // ─── 终端 ────────────────────────────────────────────────

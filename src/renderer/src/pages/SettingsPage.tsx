@@ -1,11 +1,38 @@
 /**
- * 设置页：常规、内核路径、凭据（本地加密）、配置互通、关于
+ * 设置页：常规、壁纸、官方更新、阿里百炼、内核路径、凭据、配置互通、关于
  */
 import { useEffect, useState } from 'react'
-import { KeyRound, Download, Upload, FolderOpen, Info, Plus, Trash2 } from 'lucide-react'
+import {
+  KeyRound,
+  Download,
+  Upload,
+  FolderOpen,
+  Info,
+  Plus,
+  Trash2,
+  Image as ImageIcon,
+  Search,
+  X as XIcon,
+  RefreshCw,
+  Rocket,
+  Cloud
+} from 'lucide-react'
 import { useApp } from '../stores/app'
-import { Badge, Button, Switch } from '../components/ui'
-import type { CredentialEntry } from '@shared/types'
+import { Badge, Button, Segmented, Switch } from '../components/ui'
+import type { CredentialEntry, WallpaperInfo } from '@shared/types'
+
+interface AliyunInfo {
+  config: { enabled: boolean; apiKeyId: string; model: string; modelLabel: string }
+  models: Array<{ id: string; name: string }>
+}
+
+interface UpdateInfo {
+  local: string | null
+  latest: string | null
+  outdated: boolean
+  publishedAt: string | null
+  error: string | null
+}
 
 export function SettingsPage(): React.JSX.Element {
   const { settings, appInfo, saveSettings, refreshKernel } = useApp()
@@ -16,9 +43,30 @@ export function SettingsPage(): React.JSX.Element {
   const [notice, setNotice] = useState<string | null>(null)
   const [kernelPortText, setKernelPortText] = useState('0')
 
+  // 壁纸状态
+  const [wallpaperPreview, setWallpaperPreview] = useState<string | null>(null)
+  const [wpResults, setWpResults] = useState<WallpaperInfo[]>([])
+  const [wpSearching, setWpSearching] = useState(false)
+  const [wpProgress, setWpProgress] = useState<string | null>(null)
+  const [wpScope, setWpScope] = useState<'auto' | 'custom'>('auto')
+  const [wpCustomDir, setWpCustomDir] = useState('')
+
+  // 官方更新状态
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateLog, setUpdateLog] = useState<string[]>([])
+
+  // 阿里百炼状态
+  const [aliyun, setAliyun] = useState<AliyunInfo | null>(null)
+  const [aliyunKey, setAliyunKey] = useState('')
+  const [aliyunModel, setAliyunModel] = useState('qwen-max')
+  const [aliyunTesting, setAliyunTesting] = useState(false)
+  const [aliyunTestResult, setAliyunTestResult] = useState<string | null>(null)
+
   useEffect(() => {
     void window.dsh.credentials.list().then(setCredentials)
     if (settings) setKernelPortText(String(settings.kernelPort))
+    void window.dsh.aliyun.get().then(setAliyun)
   }, [settings])
 
   const addCredential = async (): Promise<void> => {
@@ -31,9 +79,85 @@ export function SettingsPage(): React.JSX.Element {
     void window.dsh.credentials.list().then(setCredentials)
   }
 
+  const wallpaperSrc = (path: string): string => `dsh-img://local/${encodeURIComponent(path).replace(/%2F/gi, '/')}`
+  const currentWallpaper = settings?.wallpaperPath ?? ''
+
+  const searchWallpapers = async (): Promise<void> => {
+    setWpSearching(true)
+    setWpProgress('正在扫描磁盘图片…')
+    setWpResults([])
+    const off = window.dsh.wallpaper.onProgress((p) => {
+      setWpProgress(`已扫描 ${p.scanned} 个条目，找到 ${p.found} 张图片${p.currentDir ? `（${p.currentDir}）` : ''}`)
+    })
+    try {
+      const roots = wpScope === 'custom' && wpCustomDir ? [wpCustomDir] : undefined
+      const list = await window.dsh.wallpaper.search(roots)
+      setWpResults(list)
+      setWpProgress(`搜索完成：共 ${list.length} 张图片（已按修改时间倒序）`)
+    } catch (err) {
+      setWpProgress(`搜索失败：${(err as Error).message}`)
+    } finally {
+      off()
+      setWpSearching(false)
+    }
+  }
+
+  const checkUpdate = async (): Promise<void> => {
+    setUpdateChecking(true)
+    const info = await window.dsh.update.check()
+    setUpdateInfo(info)
+    setUpdateChecking(false)
+  }
+
+  const runUpdate = async (): Promise<void> => {
+    setUpdateLog([])
+    setNotice(null)
+    const session = await window.dsh.terminal.run(['dsh', '--version'], '')
+    const offOut = window.dsh.terminal.onOutput((o) => {
+      if (o.sessionId !== session.id) setUpdateLog((prev) => [...prev.slice(-80), o.text])
+    })
+    const offExit = window.dsh.terminal.onExit(async (o) => {
+      if (o.sessionId !== session.id) return
+      offOut()
+      offExit()
+      setUpdateLog((prev) => [...prev, `[更新进程结束 exit=${o.exitCode}]`])
+      if (o.exitCode === 0) {
+        setNotice('内核更新完成，请重启 DSH Desktop 后生效')
+        void checkUpdate()
+      }
+    })
+    const s = await window.dsh.terminal.run(['npm', 'install', '-g', '@deepseek-ai/dsh@latest'], '')
+    setUpdateLog((prev) => [...prev, `npm install -g @deepseek-ai/dsh@latest (session ${s.id})`])
+  }
+
+  const saveAliyun = async (): Promise<void> => {
+    setNotice(null)
+    if (!aliyunKey.trim() && !aliyun?.config.enabled) {
+      setNotice('请先输入阿里百炼 API Key（sk- 开头）')
+      return
+    }
+    const config = await window.dsh.aliyun.save(aliyunKey.trim() || null, aliyunModel)
+    setAliyunKey('')
+    setAliyun({ config, models: aliyun?.models ?? [] })
+    setNotice(`阿里百炼已配置（${config.modelLabel}）。密钥经 DPAPI 加密存储，重启内核后官方 UI 可选该模型。`)
+    void window.dsh.kernel.restart(useApp.getState().activeWorkspaceId)
+  }
+
+  const testAliyun = async (): Promise<void> => {
+    setAliyunTesting(true)
+    setAliyunTestResult(null)
+    const result = await window.dsh.aliyun.test(aliyunModel)
+    setAliyunTesting(false)
+    if (result.ok) {
+      setAliyunTestResult(`✓ 连接成功（${result.latencyMs}ms）模型 ${result.model} 回复：${result.reply ?? ''}`)
+    } else {
+      setAliyunTestResult(`✗ 连接失败：${result.error ?? '未知错误'}`)
+    }
+  }
+
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-[720px] flex-col gap-8 px-6 py-6">
+      <div className="mx-auto flex max-w-[760px] flex-col gap-8 px-6 py-6">
         {/* 常规 */}
         <section className="flex flex-col gap-3">
           <h2 className="text-[14px] font-medium" style={{ color: 'var(--fg)' }}>常规</h2>
@@ -43,6 +167,16 @@ export function SettingsPage(): React.JSX.Element {
               <div className="text-[11px] fg-3">打开应用即启动 dsh --profile web，无需手动执行 CLI</div>
             </div>
             <Switch checked={settings?.autoStartKernel ?? true} onChange={(v) => void saveSettings({ autoStartKernel: v })} />
+          </div>
+          <div className="flex items-center justify-between rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)' }}>
+            <div>
+              <div className="text-[13px]" style={{ color: 'var(--fg)' }}>开机自启动</div>
+              <div className="text-[11px] fg-3">登录 Windows 后自动启动 DSH Desktop（双击 exe 亦可直接启动，无需命令行）</div>
+            </div>
+            <Switch
+              checked={settings?.openAtLogin ?? false}
+              onChange={(v) => void window.dsh.app.setOpenAtLogin(v).then(() => void saveSettings({ openAtLogin: v }))}
+            />
           </div>
           <div className="flex items-center justify-between rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)' }}>
             <div>
@@ -65,6 +199,219 @@ export function SettingsPage(): React.JSX.Element {
                 void saveSettings({ kernelPort: Math.min(port, 65535) })
               }}
             />
+          </div>
+        </section>
+
+        {/* 壁纸 */}
+        <section className="flex flex-col gap-3">
+          <h2 className="flex items-center gap-1.5 text-[14px] font-medium" style={{ color: 'var(--fg)' }}>
+            <ImageIcon size={14} /> 壁纸
+            <span className="text-[11px] font-normal fg-3">搜索本地磁盘图片，支持 jpg/png/gif/bmp/webp/tiff/ico（文件头魔数识别）</span>
+          </h2>
+
+          {/* 当前壁纸 */}
+          <div className="flex items-center gap-3 rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)' }}>
+            {currentWallpaper ? (
+              <img
+                src={wallpaperSrc(currentWallpaper)}
+                className="h-16 w-24 rounded-lg object-cover"
+                style={{ border: '1px solid var(--border)' }}
+                alt="当前壁纸"
+                onError={() => {
+                  setWallpaperPreview('图片加载失败，文件可能已被移动')
+                  void window.dsh.wallpaper.clear()
+                }}
+              />
+            ) : (
+              <div className="flex h-16 w-24 items-center justify-center rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+                <span className="text-[11px] fg-3">未设置</span>
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px]" style={{ color: 'var(--fg)' }}>{currentWallpaper ? currentWallpaper.split(/[\\/]/).pop() : '无壁纸'}</div>
+              <div className="truncate font-mono text-[11px] fg-3">{currentWallpaper}</div>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-[11px] fg-2">不透明度</span>
+                <input
+                  type="range"
+                  min={5}
+                  max={100}
+                  value={settings?.wallpaperOpacity ?? 40}
+                  onChange={(e) => void window.dsh.wallpaper.opacity(Number(e.target.value)).then(() => void saveSettings({ wallpaperOpacity: Number(e.target.value) }))}
+                  className="w-32 accent-[var(--accent)]"
+                />
+                <span className="text-[11px] font-mono fg-2">{settings?.wallpaperOpacity ?? 40}%</span>
+              </div>
+            </div>
+            {currentWallpaper && (
+              <Button small variant="danger" onClick={() => void window.dsh.wallpaper.clear().then(() => void saveSettings({ wallpaperPath: '' }))}>
+                <XIcon size={12} /> 移除
+              </Button>
+            )}
+          </div>
+
+          {/* 搜索 */}
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented
+                options={[
+                  { value: 'auto', label: '自动（用户图片/桌面/下载 + 全部磁盘）' },
+                  { value: 'custom', label: '指定目录' }
+                ]}
+                value={wpScope}
+                onChange={(v) => setWpScope(v)}
+              />
+              {wpScope === 'custom' && (
+                <>
+                  <input
+                    className="input-pill !w-64 !py-1 font-mono text-[12px]"
+                    placeholder="目录路径…"
+                    value={wpCustomDir}
+                    onChange={(e) => setWpCustomDir(e.target.value)}
+                  />
+                  <Button small onClick={async () => {
+                    const dir = await window.dsh.app.pickDirectory()
+                    if (dir) setWpCustomDir(dir)
+                  }}>
+                    <FolderOpen size={12} />
+                  </Button>
+                </>
+              )}
+              <Button small variant="primary" disabled={wpSearching} onClick={() => void searchWallpapers()}>
+                <Search size={12} /> {wpSearching ? '搜索中…' : '搜索本地图片'}
+              </Button>
+              {wpSearching && <span className="text-[11px] fg-3">首次全盘扫描可能需要一两分钟</span>}
+            </div>
+            {wpProgress && <div className="text-[11px] fg-3">{wpProgress}</div>}
+          </div>
+
+          {/* 结果网格 */}
+          {wpResults.length > 0 && (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2 rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
+              {wpResults.map((img) => (
+                <button
+                  key={img.path}
+                  type="button"
+                  className="group relative overflow-hidden rounded-lg border text-left"
+                  style={{ borderColor: img.path === currentWallpaper ? 'var(--accent)' : 'var(--border)', aspectRatio: '1/1' }}
+                  title={`${img.name}\n${img.format.toUpperCase()} ${img.width && img.height ? `${img.width}×${img.height}` : ''} ${Math.round(img.sizeBytes / 1024)}KB\n${img.path}`}
+                  onClick={() => void window.dsh.wallpaper.set(img.path).then(() => void saveSettings({ wallpaperPath: img.path }))}
+                >
+                  <img src={wallpaperSrc(img.path)} alt={img.name} loading="lazy" className="h-full w-full object-cover" />
+                  <span className="absolute bottom-0 left-0 right-0 truncate bg-black/50 px-1 py-[1px] text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                    {img.name}
+                  </span>
+                  {img.path === currentWallpaper && (
+                    <span className="absolute right-1 top-1 rounded-full bg-accent px-1.5 text-[10px]" style={{ color: 'var(--accent-fg)' }}>当前</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* 官方更新 */}
+        <section className="flex flex-col gap-3">
+          <h2 className="flex items-center gap-1.5 text-[14px] font-medium" style={{ color: 'var(--fg)' }}>
+            <RefreshCw size={14} /> 官方更新
+            <span className="text-[11px] font-normal fg-3">与 npm 官方源实时对比 @deepseek-ai/dsh 版本</span>
+          </h2>
+          <div className="flex flex-col gap-2 rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)' }}>
+            <div className="flex items-center gap-2 text-[13px]">
+              <span className="fg-2">本地内核</span>
+              <span className="font-mono">{appInfo?.dshVersion ?? '未安装'}</span>
+              {updateInfo && (
+                <>
+                  <span className="fg-3">→ 官方最新</span>
+                  <span className="font-mono">{updateInfo.latest ?? '查询失败'}</span>
+                  {updateInfo.outdated ? (
+                    <Badge tone="danger">有更新</Badge>
+                  ) : updateInfo.latest ? (
+                    <Badge tone="success">已是最新</Badge>
+                  ) : null}
+                </>
+              )}
+              {updateInfo?.publishedAt && <span className="text-[11px] fg-3">发布于 {new Date(updateInfo.publishedAt).toLocaleString('zh-CN')}</span>}
+            </div>
+            {updateInfo?.error && <div className="text-[11px]" style={{ color: 'var(--danger)' }}>检查失败：{updateInfo.error}</div>}
+            <div className="flex items-center gap-2">
+              <Button small disabled={updateChecking} onClick={() => void checkUpdate()}>
+                <RefreshCw size={12} /> {updateChecking ? '检查中…' : '检查更新'}
+              </Button>
+              <Button small variant="primary" disabled={!updateInfo?.outdated} onClick={() => void runUpdate()}>
+                <Rocket size={12} /> 一键更新内核
+              </Button>
+              <Button small onClick={() => void window.dsh.app.openExternal('https://github.com/deepseek-ai/deepseek-harness/releases')}>
+                官方更新日志
+              </Button>
+            </div>
+            {updateLog.length > 0 && (
+              <pre className="max-h-32 overflow-y-auto rounded-lg bg-subtle p-2 text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--fg-2)' }}>
+                {updateLog.join('\n')}
+              </pre>
+            )}
+          </div>
+        </section>
+
+        {/* 阿里百炼 */}
+        <section className="flex flex-col gap-3">
+          <h2 className="flex items-center gap-1.5 text-[14px] font-medium" style={{ color: 'var(--fg)' }}>
+            <Cloud size={14} /> 阿里百炼（通义千问）
+            <span className="text-[11px] font-normal fg-3">DashScope 兼容协议接入，配置写入官方 settings.yaml，与原生 DSH 互通</span>
+          </h2>
+          <div className="flex flex-col gap-3 rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)' }}>
+            <div className="flex items-center gap-2">
+              <Badge tone={aliyun?.config.enabled ? 'success' : 'neutral'}>
+                {aliyun?.config.enabled ? `已配置 · ${aliyun.config.modelLabel}` : '未配置'}
+              </Badge>
+              {aliyun?.config.enabled && <span className="text-[11px] fg-3">重启内核后可在官方 UI 会话中选择该模型</span>}
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <input
+                  className="input-pill flex-1 font-mono"
+                  type="password"
+                  placeholder="阿里百炼 API Key（sk- 开头，DPAPI 加密存储，绝不落盘明文）"
+                  value={aliyunKey}
+                  onChange={(e) => setAliyunKey(e.target.value)}
+                />
+                <select
+                  className="input-pill !w-52 !py-2 text-[12px]"
+                  value={aliyunModel}
+                  onChange={(e) => setAliyunModel(e.target.value)}
+                >
+                  {(aliyun?.models ?? []).map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button small variant="primary" onClick={() => void saveAliyun()}>
+                  <KeyRound size={12} /> 保存配置
+                </Button>
+                <Button small disabled={aliyunTesting} onClick={() => void testAliyun()}>
+                  {aliyunTesting ? '测试中…' : '测试连接（真实对话）'}
+                </Button>
+                <Button small onClick={() => void window.dsh.app.openExternal('https://bailian.console.aliyun.com/')}>
+                  获取 Key（百炼控制台）
+                </Button>
+              </div>
+            </div>
+            {aliyunTestResult && (
+              <div
+                className="rounded-lg px-3 py-2 text-[12px] leading-relaxed"
+                style={{
+                  color: aliyunTestResult.startsWith('✓') ? 'var(--success)' : 'var(--danger)',
+                  background: 'var(--bg-subtle)'
+                }}
+              >
+                {aliyunTestResult}
+              </div>
+            )}
+            <p className="text-[11px] fg-3">
+              模型配置示例（官方格式）：settings.yaml 中的 llm-aliyun.providers.aliyun（openai-completions 协议，
+              baseURL {`https://dashscope.aliyuncs.com/compatible-mode/v1`}）。密钥以环境变量 DASHSCOPE_API_KEY 注入内核。
+            </p>
           </div>
         </section>
 

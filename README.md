@@ -12,8 +12,11 @@
 | 运行模式 | 标准 / 代码 / 极简 / 创造（对应官方 agent-presets，写入 settings.yaml 互通） |
 | 插件市场 | GitHub topic:dsh-plugin + npm 双源检索、分类筛选、一键安装/卸载/更新/回滚、本地目录导入、安全扫描 |
 | 皮肤系统 | 纯净白 / 深空黑 / 护眼灰 3 套预设 + 可视化编辑器（即时预览）+ `.dsh-theme` 导入导出 + 自定义 CSS 注入 + 跟随系统 |
+| 壁纸系统 | 本地磁盘图片搜索（jpg/png/gif/bmp/webp/tiff/ico，文件头魔数识别 + 宽高解析）、全盘/指定目录扫描、网格预览一键应用、透明度调节 |
+| 官方更新 | 与 npm 官方源实时对比 dsh 版本，一键更新内核，更新日志直达 |
+| 阿里百炼 | DashScope 接入向导：Key 经 DPAPI 加密、配置写入官方 settings.yaml、真实对话测试连接 |
 | 终端面板 | 直接调用 dsh CLI 命令（`--dump-config`、`plugin` 等），输出流式回显 |
-| 命令面板 | `Ctrl+Shift+P` 执行全部核心功能；无干扰沉浸模式；系统托盘后台运行 |
+| 命令面板 | `Ctrl+Shift+P` 执行全部核心功能；无干扰沉浸模式；系统托盘后台运行；开机自启 |
 | 配置互通 | settings.yaml 导入/导出，API Key 经 Windows DPAPI 本地加密存储 |
 
 ## 快速开始

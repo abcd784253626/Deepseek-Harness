@@ -17,7 +17,7 @@ export function TitleBar(): React.JSX.Element {
 
   return (
     <div
-      className="drag-region flex h-9 shrink-0 items-center justify-between px-2"
+      className="titlebar-bg drag-region flex h-9 shrink-0 items-center justify-between px-2"
       style={{ background: 'var(--bg)' }}
     >
       <div className="flex items-center gap-2 px-2 text-[12px] fg-2 select-none">
