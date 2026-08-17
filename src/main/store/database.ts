@@ -312,6 +312,19 @@ export function setCache(name: string, data: unknown): void {
     .run(name, JSON.stringify(data), Date.now())
 }
 
+/** 清理过期缓存（启动时调用）；保留最近 7 天 */
+export function prunePluginCache(maxAgeDays = 7, maxRows = 500): number {
+  const d = getDb()
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000
+  const removed = d.prepare('DELETE FROM plugin_cache WHERE fetched_at < ?').run(cutoff).changes
+  // 行数上限兜底：删除最旧的
+  const overflow = (d.prepare('SELECT COUNT(*) AS n FROM plugin_cache').get() as { n: number }).n - maxRows
+  if (overflow > 0) {
+    d.prepare('DELETE FROM plugin_cache WHERE name IN (SELECT name FROM plugin_cache ORDER BY fetched_at ASC LIMIT ?)').run(overflow)
+  }
+  return removed + Math.max(overflow, 0)
+}
+
 // ─── 便捷 ─────────────────────────────────────────────────────
 
 export function resolveModeId(id: AgentMode): void {

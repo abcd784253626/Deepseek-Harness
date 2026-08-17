@@ -40,6 +40,14 @@ function bootstrap(): void {
     registerImageProtocol()
     createMainWindow()
     installTray()
+    // 清理过期插件市场缓存
+    try {
+      const { getDb, prunePluginCache } = require('./store/database') as typeof import('./store/database')
+      getDb()
+      prunePluginCache()
+    } catch {
+      /* 缓存清理失败不影响启动 */
+    }
 
     // 启动时自动拉起内核（默认开启）
     const settings = getSettings()

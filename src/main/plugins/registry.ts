@@ -24,6 +24,8 @@ const UA = {
 }
 
 const CACHE_TTL = 10 * 60 * 1000 // 市场列表缓存 10 分钟
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024 // 响应体上限 2MB
+const MAX_README_BYTES = 64 * 1024 // README 入库截断
 
 export async function fetchJson<T>(url: string, timeoutMs = 15_000): Promise<T> {
   const controller = new AbortController()
@@ -31,7 +33,11 @@ export async function fetchJson<T>(url: string, timeoutMs = 15_000): Promise<T> 
   try {
     const res = await fetch(url, { headers: UA, signal: controller.signal })
     if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`)
-    return (await res.json()) as T
+    const len = Number(res.headers.get('content-length') ?? 0)
+    if (len > MAX_RESPONSE_BYTES) throw new Error(`响应过大 (${len} bytes)`)
+    const text = await res.text()
+    if (text.length > MAX_RESPONSE_BYTES) throw new Error('响应体超过 2MB 上限')
+    return JSON.parse(text) as T
   } finally {
     clearTimeout(timer)
   }
@@ -47,24 +53,38 @@ export function categoryFromKeywords(keywords: string[] | undefined): PluginCate
   return 'other'
 }
 
-export function riskOf(pkg: { scripts?: Record<string, string>; license?: unknown; author?: unknown; install?: unknown }): RiskFlag[] {
+/**
+ * 依赖安全扫描。
+ * @param scanned 是否真正拉取并检查了元数据（false 表示降级/失败 → 产出 unverified）
+ */
+export function riskOf(
+  pkg: { scripts?: Record<string, string>; license?: unknown; author?: unknown },
+  scanned = true
+): RiskFlag[] {
   const flags: RiskFlag[] = []
+  if (!scanned) {
+    flags.push({ kind: 'unverified', level: 'warn', message: '未能获取元数据，安装脚本未扫描' })
+    return flags
+  }
   const scripts = pkg.scripts ?? {}
-  const dangerous = ['install', 'postinstall', 'preinstall']
+  const dangerous = ['install', 'postinstall', 'preinstall', 'prepare']
+  const SAFE_SCRIPT_RE = /^\s*(?:node-gyp(?:$|\s+--?[\w-]+)|prebuild-install(?:\s.*)?|node-pre-gyp(?:\s.*)?)\s*$/
+  const CHAIN_RE = /&&|\|\||;|`|\$\(|\n|>|>>|</
   for (const key of dangerous) {
     const script = scripts[key]
-    if (script && !/^\s*(node-gyp|prebuild-install|node-pre-gyp)/.test(script)) {
+    if (!script) continue
+    if (!SAFE_SCRIPT_RE.test(script) || CHAIN_RE.test(script)) {
       flags.push({
         kind: 'install-script',
         level: 'danger',
-        message: `包声明了 ${key} 脚本（会在安装时执行任意命令）: ${script.slice(0, 80)}`
+        message: `包声明了 ${key} 脚本（安装时执行）: ${script.slice(0, 80)}`
       })
     }
   }
   if (!pkg.license) {
     flags.push({ kind: 'no-license', level: 'warn', message: '未声明开源许可证，使用需自行评估风险' })
   }
-  if (!pkg.author && !pkg.install) {
+  if (!pkg.author) {
     flags.push({ kind: 'unknown-author', level: 'info', message: '作者信息缺失' })
   }
   return flags
@@ -99,6 +119,20 @@ async function fetchRepoPackage(repoFullName: string): Promise<{ name: string; k
   }
 }
 
+/** 限并发抓取仓库元数据 */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++
+      results[idx] = await fn(items[idx])
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
 export async function searchGithub(): Promise<RegistryPlugin[]> {
   const cache = getCache<RegistryPlugin[]>('market:github')
   if (cache && Date.now() - cache.fetchedAt < CACHE_TTL) return cache.data
@@ -106,17 +140,15 @@ export async function searchGithub(): Promise<RegistryPlugin[]> {
   const result = await fetchJson<GithubSearchResult>(
     `${GITHUB_SEARCH}?q=topic:dsh-plugin&sort=stars&order=desc&per_page=50`
   )
+  if (!Array.isArray(result.items)) return []
+  const pkgs = await mapWithConcurrency(result.items, 10, (repo) => fetchRepoPackage(repo.full_name))
   const plugins: RegistryPlugin[] = []
-  for (const repo of result.items) {
-    if (repo.owner.type === 'Organization' && repo.owner.login === 'deepseek-ai' && repo.full_name.includes('deepseek-harness')) {
-      continue // 官方主仓库本身不是插件
-    }
-    const pkg = await fetchRepoPackage(repo.full_name)
+  for (let i = 0; i < result.items.length; i++) {
+    const repo = result.items[i]
+    // 核心包不进入市场（含第三方冒用官方前缀的包）
+    const pkg = pkgs[i]
     const name = pkg?.name
-    if (!name || name === 'dsh' || name.startsWith('@deepseek-ai/dsh-')) {
-      // 跳过同名/核心包（核心包属于内核本体，不进入市场）
-      if (!name || name === 'dsh') continue
-    }
+    if (!name || name === 'dsh' || name.startsWith('@deepseek-ai/dsh-')) continue
     const npm = await fetchNpmMeta(name).catch(() => null)
     const license = repo.license?.spdx_id ?? npm?.license ?? null
     plugins.push({
@@ -130,7 +162,10 @@ export async function searchGithub(): Promise<RegistryPlugin[]> {
       homepage: repo.html_url,
       npmVersion: npm?.version ?? null,
       riskFlags: [
-        ...riskOf({ scripts: npm?.scripts, license: repo.license?.spdx_id, author: npm?.author }),
+        ...riskOf(
+          { scripts: npm?.scripts, license: repo.license?.spdx_id, author: npm?.author },
+          npm !== null
+        ),
         ...(repo.archived ? [{ kind: 'archived' as const, level: 'warn' as RiskLevel, message: '仓库已归档，不再维护' }] : [])
       ],
       archived: repo.archived,
@@ -168,8 +203,9 @@ export async function searchNpm(query = ''): Promise<RegistryPlugin[]> {
 
   const term = query ? `keywords:${query}` : 'keywords:dsh-plugin'
   const result = await fetchJson<NpmSearchResult>(`${NPM_SEARCH}?text=${encodeURIComponent(term)}&size=50`)
+  if (!Array.isArray(result.objects)) return []
   const plugins: RegistryPlugin[] = result.objects
-    .filter((o) => !o.package.name.startsWith('@deepseek-ai/dsh-') || o.package.name !== 'dsh')
+    .filter((o) => o.package.name !== 'dsh' && !o.package.name.startsWith('@deepseek-ai/dsh-'))
     .map((o) => {
       const p = o.package
       return {
@@ -233,7 +269,7 @@ export async function fetchNpmMeta(name: string): Promise<NpmMeta | null> {
       homepage: doc.homepage,
       repository: undefined,
       versions: Object.keys(doc.versions ?? {}).sort(),
-      readme: doc.readme
+      readme: doc.readme ? doc.readme.slice(0, MAX_README_BYTES) : undefined
     }
     setCache(cacheKey, meta)
     return meta
@@ -242,11 +278,13 @@ export async function fetchNpmMeta(name: string): Promise<NpmMeta | null> {
   }
 }
 
-/** 市场合集（GitHub + npm 去重合并；相关性软过滤：名称/描述/keywords 含 dsh 或 deepseek） */
+/** 市场合集（GitHub + npm 去重合并；单源失败降级不阻塞整体） */
 export async function searchMarket(query = ''): Promise<RegistryPlugin[]> {
-  const [gh, npm] = await Promise.all([searchGithub(), searchNpm(query)])
+  const [gh, npm] = await Promise.allSettled([searchGithub(), searchNpm(query)])
+  const ghList = gh.status === 'fulfilled' ? gh.value : []
+  const npmList = npm.status === 'fulfilled' ? npm.value : []
   const byName = new Map<string, RegistryPlugin>()
-  for (const p of [...gh, ...npm]) {
+  for (const p of [...ghList, ...npmList]) {
     const existing = byName.get(p.name)
     if (!existing || p.source === 'npm') byName.set(p.name, p)
   }

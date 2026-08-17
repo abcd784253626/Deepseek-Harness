@@ -23,8 +23,22 @@ import type {
   WorkspaceInfo
 } from '@shared/types'
 
-const send = (channel: string, ...args: unknown[]): Promise<unknown> =>
-  ipcRenderer.invoke(channel, ...args)
+/**
+ * IPC 载荷清洗：所有参数经 JSON 序列化往返。
+ * 目的：剥离不可序列化内容与原型污染语义 —— JSON.parse 产生的 "__proto__"
+ * 是自有数据键（不触发原型 setter），主进程侧白名单即可显式拒绝。
+ */
+const send = (channel: string, ...args: unknown[]): Promise<unknown> => {
+  const cleaned = args.map((a) => {
+    if (a === undefined) return undefined
+    try {
+      return JSON.parse(JSON.stringify(a)) as unknown
+    } catch {
+      return a
+    }
+  })
+  return ipcRenderer.invoke(channel, ...cleaned)
+}
 
 const api = {
   app: {

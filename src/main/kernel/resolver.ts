@@ -68,9 +68,40 @@ function findFromPath(): DshBinary | null {
       const version = probeVersion(script)
       return { path: script, version, viaPath: false }
     }
+    // 垫片存在但 bin.js 缺失：保留 viaPath 兜底（调用方需以 shell 执行）
     return { path: cmd, version: null, viaPath: true }
   }
   return null
+}
+
+/**
+ * 校验入口是否属于官方 @deepseek-ai/dsh 包树：
+ * 向上查找 package.json 的 name 字段（bin.js 位于 <pkg>/lib/bin.js）
+ */
+function isOfficialDshEntry(entry: string): boolean {
+  try {
+    const resolved = require('node:path').resolve(entry)
+    const { dirname, join } = require('node:path') as typeof import('node:path')
+    let dir = dirname(resolved)
+    for (let i = 0; i < 6; i++) {
+      const pkgPath = join(dir, 'package.json')
+      if (existsSync(pkgPath)) {
+        try {
+          const doc = JSON.parse(require('node:fs').readFileSync(pkgPath, 'utf-8'))
+          if (doc?.name === '@deepseek-ai/dsh') return true
+          return false
+        } catch {
+          return false
+        }
+      }
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  } catch {
+    /* 校验失败按非官方处理 */
+  }
+  return false
 }
 
 export function resolveDsh(override: string): DshBinary | null {
@@ -78,7 +109,9 @@ export function resolveDsh(override: string): DshBinary | null {
     if (existsSync(override)) {
       const script = override.endsWith('.cmd') ? normalizeCmdShim(override) : null
       const entry = script ?? override
-      return { path: entry, version: probeVersion(entry), viaPath: !script }
+      // 覆盖路径必须是官方 dsh CLI（防止任意可执行文件被拉起）
+      if (entry.endsWith('.cmd') || !isOfficialDshEntry(entry)) return null
+      return { path: entry, version: probeVersion(entry), viaPath: false }
     }
     return null
   }
@@ -131,16 +164,23 @@ export function appVersion(): string {
 
 /**
  * 定位系统 Node.js 运行时。
- * 内核必须在系统 Node 下运行（Electron 内置 Node 20 对部分 profile 依赖
- * 的解析语义不兼容，实测 Node 24 一切正常；dsh CLI 本身也要求系统 Node）。
- * 查找顺序：环境变量覆盖 → PATH → 常见安装路径。
+ * 返回绝对路径（不返回裸命令名 'node'，避免 Windows CreateProcess
+ * 搜索顺序 / PATH 劫持执行非预期可执行文件）。
  */
 export function resolveSystemNode(): string | null {
   const override = process.env.DSH_DESKTOP_NODE_BIN
   if (override && existsSync(override)) return override
   try {
-    const res = spawnSync('node', ['--version'], { timeout: 5000, windowsHide: true, encoding: 'utf-8' })
-    if (res.status === 0 && res.stdout.trim().startsWith('v')) return 'node'
+    // 先探测 PATH 中的 node 并解析出真实 execPath 绝对路径
+    const res = spawnSync('node', ['-p', 'process.execPath'], {
+      timeout: 5000,
+      windowsHide: true,
+      encoding: 'utf-8'
+    })
+    if (res.status === 0 && res.stdout) {
+      const abs = res.stdout.trim()
+      if (abs && existsSync(abs)) return abs
+    }
   } catch {
     /* PATH 无 node */
   }

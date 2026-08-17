@@ -43,6 +43,7 @@ import { terminalRunner } from './terminal/runner'
 import { getMainWindow, toggleMaximize, minimizeWindow, requestClose, isMaximized } from './window'
 import { homedir } from 'node:os'
 import { scanForImages, listLocalDrives, defaultImageDirs } from './wallpaper/scanner'
+import { invalidateImageAllowlist } from './wallpaper/protocol'
 import { checkDshUpdate } from './updates'
 import { writeUiThemePreference } from './theme-sync'
 import { getSettings as getSettingsStore } from './store/database'
@@ -128,6 +129,8 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.workspace.get, (_e, id: string) => getWorkspace(id))
   ipcMain.handle(IPC.workspace.create, (_e, info: { name: string; path: string; dshHome?: string }) => {
     if (!info.name?.trim() || !info.path?.trim()) throw new Error('工作区名称与路径不能为空')
+    if (!/^[a-zA-Z]:[\\/]/.test(info.path)) throw new Error('工作区路径必须是绝对路径')
+    if (info.dshHome && !/^[a-zA-Z]:[\\/]/.test(info.dshHome)) throw new Error('DSH_HOME 必须是绝对路径')
     if (!existsSync(info.path)) mkdirSync(info.path, { recursive: true })
     const row: WorkspaceInfo = {
       id: randomUUID(),
@@ -153,48 +156,101 @@ export function registerIpc(): void {
   })
 
   // ─── 设置 ────────────────────────────────────────────────
+  // 键名白名单：只允许 DesktopSettings 的已知字段，杜绝任意键写入
+  const SETTINGS_KEYS = new Set([
+    'followSystemTheme', 'themeId', 'autoStartKernel', 'minimizeToTray', 'kernelPort',
+    'dshPathOverride', 'dshHomeOverride', 'lastWorkspaceId', 'lastMode', 'customCss',
+    'wallpaperPath', 'wallpaperOpacity', 'openAtLogin'
+  ])
   ipcMain.handle(IPC.settings.get, () => getSettings())
-  ipcMain.handle(IPC.settings.set, (_e, patch: Partial<DesktopSettings>) => patchSettings(patch))
+  ipcMain.handle(IPC.settings.set, (_e, patch: Partial<DesktopSettings>) => {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('无效的设置载荷')
+    // 原型必须是纯净 Object.prototype（防 __proto__ 经反序列化变成原型设置）
+    if (Object.getPrototypeOf(patch) !== Object.prototype) throw new Error('非法载荷原型')
+    for (const key of Reflect.ownKeys(patch)) {
+      // 显式拒绝原型相关键（含自有 "__proto__" 键场景）
+      if (typeof key !== 'string' || key === '__proto__' || key === 'constructor' || key === 'prototype') {
+        throw new Error('非法设置键')
+      }
+      if (!SETTINGS_KEYS.has(key)) throw new Error(`未知设置键: ${key}`)
+    }
+    return patchSettings(patch)
+  })
 
   // ─── 运行模式 ────────────────────────────────────────────
   ipcMain.handle(IPC.mode.list, () => AGENT_MODES)
   ipcMain.handle(IPC.mode.get, () => modeInfo(getSettings().lastMode))
   ipcMain.handle(IPC.mode.set, (_e, id: AgentMode) => {
+    if (!AGENT_MODES.some((m) => m.id === id)) throw new Error(`未知运行模式: ${String(id)}`)
     const info = modeInfo(id)
     patchSettings({ lastMode: id })
     return info
   })
 
   // ─── 凭据 ────────────────────────────────────────────────
+  // 键名仅允许环境变量形式，且拒绝可篡改运行环境的危险键
+  const CRED_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+  const FORBIDDEN_CRED_KEYS = new Set([
+    'PATH', 'PATHEXT', 'COMSPEC', 'HOME', 'USERPROFILE', 'TMP', 'TEMP', 'TMPDIR',
+    'NODE_OPTIONS', 'NODE_PATH', 'DSH_HOME', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES',
+    'ELECTRON_RUN_AS_NODE', 'FORCE_COLOR', 'NO_COLOR'
+  ])
   ipcMain.handle(IPC.credentials.list, () => listCredentials())
   ipcMain.handle(IPC.credentials.set, (_e, key: string, label: string, value: string) => {
-    if (!key?.trim() || !value) throw new Error('键与值不能为空')
-    return dbSetCredential(key.trim(), label || key, value)
+    const trimmed = String(key ?? '').trim()
+    if (!CRED_KEY_RE.test(trimmed)) throw new Error('凭据键名必须为环境变量形式（字母/数字/下划线）')
+    if (FORBIDDEN_CRED_KEYS.has(trimmed.toUpperCase())) throw new Error(`键名 ${trimmed} 被禁止（可能篡改运行环境）`)
+    if (!value) throw new Error('凭据值不能为空')
+    return dbSetCredential(trimmed, label || trimmed, value)
   })
   ipcMain.handle(IPC.credentials.remove, (_e, key: string) => dbRemoveCredential(key))
 
   // ─── 插件 ────────────────────────────────────────────────
-  ipcMain.handle(IPC.plugins.search, (_e, query: string) => searchMarket(query))
+  // 参数白名单：npm 包名（含 scope/版本）或 link: 绝对路径；拒绝 shell 元字符与选项注入
+  const NPM_NAME_RE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(?:@[0-9A-Za-z][0-9A-Za-z._-]*)?$/
+  const SHELL_META_RE = /[&|;`$()<>%^"']/
+  const validatePluginName = (name: string): string => {
+    const trimmed = String(name ?? '').trim()
+    if (!NPM_NAME_RE.test(trimmed) || SHELL_META_RE.test(trimmed)) {
+      throw new Error('非法的插件名（仅允许 npm 包名格式）')
+    }
+    return trimmed
+  }
+  const validatePluginSpec = (spec: string): string => {
+    const trimmed = String(spec ?? '').trim()
+    if (trimmed.startsWith('link:')) {
+      const target = trimmed.slice(5)
+      if (!target || SHELL_META_RE.test(target) || !/^[a-zA-Z]:[\\/]/.test(target)) {
+        throw new Error('非法的本地插件路径')
+      }
+      return trimmed
+    }
+    return validatePluginName(trimmed)
+  }
+  ipcMain.handle(IPC.plugins.search, (_e, query: string) => searchMarket(String(query ?? '').slice(0, 100)))
   ipcMain.handle(IPC.plugins.installed, () => pluginManager.syncInstalled())
   ipcMain.handle(IPC.plugins.install, async (_e, spec: string) => {
-    const result = await pluginManager.install(spec)
+    const safeSpec = validatePluginSpec(spec)
+    const result = await pluginManager.install(safeSpec)
     if (result.ok) {
-      // 装完自动重启内核使插件树生效
-      const settings = getSettings()
-      void kernelManager.restart(settings.lastWorkspaceId || null)
+      // 装完自动重启内核使插件树生效（串行化由 kernelManager 内部保证）
+      const current = kernelManager.getState().workspaceId
+      void kernelManager.restart(current)
     }
     return result
   })
   ipcMain.handle(IPC.plugins.uninstall, async (_e, name: string) => {
-    const result = await pluginManager.uninstall(name)
+    const safeName = validatePluginName(name)
+    const result = await pluginManager.uninstall(safeName)
     if (result.ok) {
-      const settings = getSettings()
-      void kernelManager.restart(settings.lastWorkspaceId || null)
+      const current = kernelManager.getState().workspaceId
+      void kernelManager.restart(current)
     }
     return result
   })
   ipcMain.handle(IPC.plugins.detail, async (_e, name: string) => {
-    const meta = await fetchNpmMeta(name)
+    const safeName = validatePluginName(name)
+    const meta = await fetchNpmMeta(safeName)
     if (!meta) return { plugin: null, readme: null, versions: [] }
     const plugin = {
       name: meta.name,
@@ -206,14 +262,22 @@ export function registerIpc(): void {
       license: meta.license,
       homepage: meta.homepage ?? null,
       npmVersion: meta.version,
-      riskFlags: riskOf({ scripts: meta.scripts, license: meta.license, author: meta.author }),
+      riskFlags: riskOf({ scripts: meta.scripts, license: meta.license, author: meta.author }, true),
       archived: false,
       source: 'npm' as const
     }
     return { plugin, readme: meta.readme ?? null, versions: meta.versions }
   })
-  ipcMain.handle(IPC.plugins.versions, (_e, name: string) => pluginManager.availableVersions(name))
-  ipcMain.handle(IPC.plugins.enable, (_e, name: string, enabled: boolean) => pluginManager.enable(name, enabled))
+  ipcMain.handle(IPC.plugins.versions, (_e, name: string) => pluginManager.availableVersions(validatePluginName(name)))
+  ipcMain.handle(IPC.plugins.enable, async (_e, name: string, enabled: boolean) => {
+    const safeName = validatePluginName(name)
+    const result = await pluginManager.enable(safeName, Boolean(enabled))
+    if (result.ok) {
+      const current = kernelManager.getState().workspaceId
+      void kernelManager.restart(current)
+    }
+    return result
+  })
   ipcMain.handle(IPC.plugins.categories, () => ({
     all: '全部',
     model: '模型',
@@ -290,7 +354,17 @@ export function registerIpc(): void {
       filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }]
     })
     if (result.canceled || !result.filePaths[0]) return null
-    const { copyFileSync } = require('node:fs') as typeof import('node:fs')
+    const { copyFileSync, readFileSync } = require('node:fs') as typeof import('node:fs')
+    // 导入前结构校验：必须是对象根，拒绝明显异常结构
+    try {
+      const yamlLib = require('js-yaml') as typeof import('js-yaml')
+      const parsed = yamlLib.load(readFileSync(result.filePaths[0], 'utf-8'))
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('配置文件根必须是对象')
+      }
+    } catch (err) {
+      throw new Error(`导入失败（配置结构非法）: ${(err as Error).message}`)
+    }
     const settings = getSettings()
     const home = settings.dshHomeOverride || join(homedir(), '.dsh')
     mkdirSync(home, { recursive: true })
@@ -312,8 +386,9 @@ export function registerIpc(): void {
   })
   ipcMain.handle(IPC.wallpaper.set, (_e, path: string) => {
     const { statSync } = require('node:fs') as typeof import('node:fs')
-    if (!path || !statSync(path).isFile()) throw new Error('无效的图片路径')
+    if (!path || typeof path !== 'string' || !statSync(path).isFile()) throw new Error('无效的图片路径')
     patchSettings({ wallpaperPath: path })
+    invalidateImageAllowlist() // 壁纸路径变化 → 协议白名单失效重算
     return getSettingsStore().wallpaperPath
   })
   ipcMain.handle(IPC.wallpaper.get, () => getSettings().wallpaperPath)

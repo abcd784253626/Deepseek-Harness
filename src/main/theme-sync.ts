@@ -4,7 +4,7 @@
  * （light | dark | system，默认 system）—— 系统为暗色时官方 UI 即变灰。
  * 桌面主题切换时同步该字段，保证官方 UI 与桌面壳色调统一。
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { getSettings } from './store/database'
@@ -19,9 +19,15 @@ export function writeUiThemePreference(type: 'light' | 'dark'): void {
       const parsed = yaml.load(readFileSync(path, 'utf-8'))
       if (parsed && typeof parsed === 'object') doc = parsed as Record<string, unknown>
     }
-    doc['ui-theme'] = { preference: type }
+    // 只更新 ui-theme.preference，保留其余 ui-theme 子键
+    const uiTheme = ((doc['ui-theme'] as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>
+    uiTheme['preference'] = type
+    doc['ui-theme'] = uiTheme
     const yaml = require('js-yaml') as typeof import('js-yaml')
-    writeFileSync(path, yaml.dump(doc, { noRefs: true }), 'utf-8')
+    // 原子写：临时文件 + rename，避免内核并发读到半写文件
+    const tmp = `${path}.tmp-${Date.now()}`
+    writeFileSync(tmp, yaml.dump(doc, { noRefs: true }), 'utf-8')
+    renameSync(tmp, path)
   } catch {
     /* 同步失败不阻塞启动 */
   }

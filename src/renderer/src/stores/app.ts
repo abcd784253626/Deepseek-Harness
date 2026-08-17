@@ -16,6 +16,7 @@ export type Page = 'chat' | 'plugins' | 'themes' | 'settings' | 'workspaces' | '
 
 interface AppState {
   ready: boolean
+  bootError: string | null
   appInfo: AppInfo | null
   settings: DesktopSettings | null
   themes: ThemeDefinition[]
@@ -60,6 +61,7 @@ function resolveActive(
 
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
+  bootError: null,
   appInfo: null,
   settings: null,
   themes: [],
@@ -74,39 +76,42 @@ export const useApp = create<AppState>((set, get) => ({
   commandPaletteOpen: false,
 
   bootstrap: async () => {
-    const [appInfo, settings, themes, kernel, workspaces, modes, systemTheme, customCss] =
-      await Promise.all([
-        window.dsh.app.info(),
-        window.dsh.settings.get(),
-        window.dsh.themes.list(),
-        window.dsh.kernel.state(),
-        window.dsh.workspace.list(),
-        window.dsh.mode.list(),
-        window.dsh.themes.systemTheme(),
-        window.dsh.themes.getCss()
-      ])
-    const activeTheme = resolveActive(themes, settings, systemTheme)
-    const activeWorkspaceId =
-      settings.lastWorkspaceId && workspaces.some((w) => w.id === settings.lastWorkspaceId)
-        ? settings.lastWorkspaceId
-        : workspaces[0]?.id ?? null
-    set({
-      ready: true,
-      appInfo,
-      settings,
-      themes,
-      activeTheme,
-      customCss,
-      kernel,
-      workspaces,
-      activeWorkspaceId,
-      modes
-    })
+    try {
+      const [appInfo, settings, themes, kernel, workspaces, modes, systemTheme, customCss] =
+        await Promise.all([
+          window.dsh.app.info(),
+          window.dsh.settings.get(),
+          window.dsh.themes.list(),
+          window.dsh.kernel.state(),
+          window.dsh.workspace.list(),
+          window.dsh.mode.list(),
+          window.dsh.themes.systemTheme(),
+          window.dsh.themes.getCss()
+        ])
+      const activeTheme = resolveActive(themes, settings, systemTheme)
+      const activeWorkspaceId =
+        settings.lastWorkspaceId && workspaces.some((w) => w.id === settings.lastWorkspaceId)
+          ? settings.lastWorkspaceId
+          : workspaces[0]?.id ?? null
+      set({
+        ready: true,
+        bootError: null,
+        appInfo,
+        settings,
+        themes,
+        activeTheme,
+        customCss,
+        kernel,
+        workspaces,
+        activeWorkspaceId,
+        modes
+      })
+    } catch (err) {
+      set({ bootError: (err as Error).message })
+      return
+    }
     // 内核状态订阅
     window.dsh.kernel.onState((s) => set({ kernel: s }))
-    window.dsh.kernel.onLog(() => {
-      /* 日志面板独立拉取 */
-    })
     void get().refreshKernel()
   },
 

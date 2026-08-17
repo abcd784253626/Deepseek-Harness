@@ -2,10 +2,84 @@
  * 皮肤系统 — 主进程侧
  * 内置 3 套官方极简预设（纯净白 / 深空黑 / 护眼灰），
  * 用户主题存 SQLite，.dsh-theme 文件为 JSON 交换格式。
+ *
+ * 安全：令牌值在入库前统一净化（颜色/字号/字体白名单 + CSS 注入字符拒绝），
+ * 因为令牌会作为 CSS 注入壳层与官方 UI 文档。
  */
 import { readFileSync, writeFileSync } from 'node:fs'
-import type { ThemeDefinition } from '@shared/types'
+import type { ThemeDefinition, ThemeTokens } from '@shared/types'
 import { getSettings, patchSettings, listThemes, getTheme, upsertTheme, removeTheme as dbRemoveTheme } from '../store/database'
+
+const COLOR_RE = /^#[0-9a-fA-F]{3,8}$|^(?:rgb|hsl)a?\([0-9.,\s%]+\)$|^[a-z]+$/i
+const FONT_OPTIONS = new Set([
+  '"Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif',
+  '"Microsoft YaHei", "Segoe UI", sans-serif',
+  '"Segoe UI", sans-serif',
+  '"Consolas", "Cascadia Mono", monospace'
+])
+const CSS_INJECT_RE = /[{};\\]|@import|url\s*\(|expression\s*\(|<\/?style|<\/?script/i
+
+/**
+ * 净化令牌：非法值回退默认，杜绝 CSS 注入。
+ * 返回 { tokens, issues } —— issues 非空时调用方应拒绝保存。
+ */
+export function sanitizeTokens(tokens: unknown): { tokens: ThemeTokens; issues: string[] } {
+  const issues: string[] = []
+  const src = (tokens && typeof tokens === 'object' ? tokens : {}) as Record<string, unknown>
+  const fallback = BUILTIN_THEMES[0].tokens
+  const str = (k: keyof ThemeTokens): string => {
+    const v = src[k]
+    return typeof v === 'string' ? v.trim() : ''
+  }
+  const color = (k: keyof ThemeTokens, def: string): string => {
+    const v = str(k) || def
+    if (!COLOR_RE.test(v) || CSS_INJECT_RE.test(v)) {
+      issues.push(`令牌 ${k} 含非法字符，已回退默认`)
+      return def
+    }
+    return v
+  }
+  const num = (k: 'radius' | 'fontSize', def: number, min: number, max: number): number => {
+    const n = Number(src[k])
+    if (!Number.isFinite(n) || n < min || n > max) {
+      issues.push(`令牌 ${k} 超出范围，已回退默认`)
+      return def
+    }
+    return Math.round(n)
+  }
+  let fontFamily = str('fontFamily')
+  if (!fontFamily || !FONT_OPTIONS.has(fontFamily) || CSS_INJECT_RE.test(fontFamily)) {
+    if (fontFamily) issues.push('字体不在白名单，已回退默认')
+    fontFamily = fallback.fontFamily
+  }
+  return {
+    tokens: {
+      bg: color('bg', fallback.bg),
+      bgSubtle: color('bgSubtle', fallback.bgSubtle),
+      bgElevated: color('bgElevated', fallback.bgElevated),
+      fg: color('fg', fallback.fg),
+      fgSecondary: color('fgSecondary', fallback.fgSecondary),
+      fgDisabled: color('fgDisabled', fallback.fgDisabled),
+      border: color('border', fallback.border),
+      accent: color('accent', fallback.accent),
+      accentFg: color('accentFg', fallback.accentFg),
+      danger: color('danger', fallback.danger),
+      success: color('success', fallback.success),
+      radius: num('radius', fallback.radius, 0, 32),
+      fontSize: num('fontSize', fallback.fontSize, 10, 24),
+      fontFamily
+    },
+    issues
+  }
+}
+
+/** 净化 customCss：拒绝明显危险的 CSS 注入结构并限长 */
+export function sanitizeCustomCss(css: unknown): string {
+  if (typeof css !== 'string') return ''
+  const trimmed = css.slice(0, 64 * 1024)
+  if (/@import|expression\s*\(|<\/?script/i.test(trimmed)) return ''
+  return trimmed
+}
 
 export const BUILTIN_THEMES: ThemeDefinition[] = [
   {
@@ -101,7 +175,13 @@ export function applyTheme(id: string): ThemeDefinition | null {
 }
 
 export function saveUserTheme(theme: ThemeDefinition): ThemeDefinition {
-  const saved: ThemeDefinition = { ...theme, source: 'user' }
+  const sanitized = sanitizeTokens(theme.tokens)
+  const saved: ThemeDefinition = {
+    ...theme,
+    source: 'user',
+    tokens: sanitized.tokens,
+    customCss: sanitizeCustomCss(theme.customCss)
+  }
   upsertTheme(saved)
   return saved
 }
@@ -158,5 +238,8 @@ export function getCustomCss(): string {
 }
 
 export function setCustomCss(css: string): void {
-  patchSettings({ customCss: css })
+  // 显式自定义 CSS 功能保留任意性，但限长并拒绝 script 注入
+  const cleaned = typeof css === 'string' ? css.slice(0, 64 * 1024) : ''
+  const safe = /<\/?script/i.test(cleaned) ? cleaned.replace(/<\/?script[^>]*>/gi, '') : cleaned
+  patchSettings({ customCss: safe })
 }

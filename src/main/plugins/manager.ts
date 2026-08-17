@@ -9,9 +9,9 @@
  */
 import { EventEmitter } from 'node:events'
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import type { InstalledPlugin, PluginCategory, PluginOpResult } from '@shared/types'
 import { getSettings } from '../store/database'
 import {
@@ -22,6 +22,14 @@ import {
 } from '../store/database'
 import { resolveDsh, pnpmAvailable } from '../kernel/resolver'
 import { fetchNpmMeta } from './registry'
+
+/** npm 包名白名单（含 scope）；防止路径遍历与 shell 元字符 */
+export const NPM_NAME_RE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/
+
+/** 校验依赖键为合法 npm 包名（syncInstalled 读取其 node_modules 路径时使用） */
+export function isSafePackageName(name: string): boolean {
+  return NPM_NAME_RE.test(name) && !name.includes('..') && !name.includes('\\')
+}
 
 export function resolveProfileDir(dshHomeOverride = ''): string {
   const settings = getSettings()
@@ -53,17 +61,30 @@ export function readProfileJson(dshHomeOverride = ''): {
 }
 
 export function writeProfileJson(patch: { dependencies?: Record<string, string>; bundles?: string[] }): boolean {
-  const current = readProfileJson()
-  if (!current) return false
-  const doc = JSON.parse(readFileSync(current.path, 'utf-8'))
-  if (patch.dependencies) doc.dependencies = patch.dependencies
-  if (patch.bundles) {
-    doc.dsh = doc.dsh ?? {}
-    doc.dsh.profile = doc.dsh.profile ?? {}
-    doc.dsh.profile.bundles = patch.bundles
+  try {
+    const current = readProfileJson()
+    if (!current) return false
+    const doc = JSON.parse(readFileSync(current.path, 'utf-8')) as Record<string, unknown>
+    if (patch.dependencies) doc.dependencies = patch.dependencies
+    if (patch.bundles) {
+      const dsh = (doc.dsh as Record<string, unknown> | undefined) ?? {}
+      const profile = (dsh.profile as Record<string, unknown> | undefined) ?? {}
+      profile.bundles = patch.bundles
+      dsh.profile = profile
+      doc.dsh = dsh
+    }
+    atomicWriteJson(current.path, doc)
+    return true
+  } catch {
+    return false
   }
-  writeFileSync(current.path, JSON.stringify(doc, null, 2) + '\n', 'utf-8')
-  return true
+}
+
+/** 原子写：同目录临时文件 + rename（防半写损坏） */
+function atomicWriteJson(filePath: string, doc: unknown): void {
+  const tmp = `${filePath}.tmp-${Date.now()}`
+  writeFileSync(tmp, JSON.stringify(doc, null, 2) + '\n', 'utf-8')
+  renameSync(tmp, filePath)
 }
 
 interface RunResult {
@@ -72,22 +93,49 @@ interface RunResult {
   output: string
 }
 
+/** 杀进程树（Windows） */
+function killTree(pid: number): void {
+  try {
+    const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    killer.unref()
+  } catch {
+    /* 已退出 */
+  }
+}
+
+/**
+ * 执行 dsh plugin 命令。
+ * 安全边界：始终以参数数组 spawn（无 shell）；dsh 入口统一解析到 bin.js。
+ */
 function runCommand(entry: string, isCmd: boolean, args: string[], env: NodeJS.ProcessEnv, timeoutMs = 300_000): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = isCmd
       ? spawn(entry, args, { env, windowsHide: true, shell: true })
       : spawn(process.execPath, [entry, ...args], { env, windowsHide: true })
     let output = ''
+    let settled = false
     child.stdout?.on('data', (c: Buffer) => (output += c.toString()))
     child.stderr?.on('data', (c: Buffer) => (output += c.toString()))
     const timer = setTimeout(() => {
-      child.kill()
+      if (settled) return
+      settled = true
+      try {
+        child.kill()
+      } catch {
+        /* 忽略 */
+      }
+      killTree(child.pid ?? 0)
+      resolve({ ok: false, code: null, output: output + '\n[超时已终止]' })
     }, timeoutMs)
     child.on('error', (err) => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
       resolve({ ok: false, code: null, output: output + `\n${err.message}` })
     })
     child.on('close', (code) => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
       resolve({ ok: code === 0, code, output })
     })
@@ -96,20 +144,23 @@ function runCommand(entry: string, isCmd: boolean, args: string[], env: NodeJS.P
 
 /** 插件操作事件（安装进度/日志），供 UI 订阅 */
 export class PluginManager extends EventEmitter {
-  /** 执行 dsh plugin 命令 */
-  private async dshPlugin(args: string[]): Promise<RunResult> {
-    const settings = getSettings()
-    const binary = resolveDsh(settings.dshPathOverride)
-    if (!binary) {
-      return { ok: false, code: null, output: '未找到 dsh CLI' }
-    }
-    const isCmd = binary.viaPath || binary.path.endsWith('.cmd')
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      DSH_HOME: settings.dshHomeOverride || join(homedir(), '.dsh')
-    }
-    return runCommand(binary.path, isCmd, ['plugin', '--profile', 'web', ...args], env)
+/** 执行 dsh plugin 命令；dsh 入口优先解析为 bin.js（无 shell） */
+private async dshPlugin(args: string[]): Promise<RunResult> {
+  const settings = getSettings()
+  const binary = resolveDsh(settings.dshPathOverride)
+  if (!binary) {
+    return { ok: false, code: null, output: '未找到 dsh CLI' }
   }
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    DSH_HOME: settings.dshHomeOverride || join(homedir(), '.dsh')
+  }
+  if (binary.viaPath) {
+    // 兜底路径（.cmd 且 bin.js 缺失）：参数已由调用方白名单校验
+    return runCommand(binary.path, true, ['plugin', '--profile', 'web', ...args], env)
+  }
+  return runCommand(binary.path, false, ['plugin', '--profile', 'web', ...args], env)
+}
 
   /** 从 profile package.json 同步已安装插件到本地库 */
   syncInstalled(): InstalledPlugin[] {
@@ -141,9 +192,10 @@ export class PluginManager extends EventEmitter {
         })
         known.add(name)
       }
-      // 补全版本号（读 profile node_modules 的 package.json）
+      // 补全版本号（读 profile node_modules 的 package.json；仅安全包名）
       const dir = resolveProfileDir()
       for (const name of known) {
+        if (!isSafePackageName(name)) continue
         const pkgPath = join(dir, 'node_modules', name.replace('/', '/node_modules/'), 'package.json')
         if (existsSync(pkgPath)) {
           try {

@@ -32,7 +32,8 @@ export function TerminalPage(): React.JSX.Element {
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const cwd = workspaces.find((w) => w.id === activeWorkspaceId)?.path ?? process.cwd?.() ?? ''
+  // 沙箱渲染进程无 process 全局；cwd 一律来自主进程工作区数据
+  const cwd = workspaces.find((w) => w.id === activeWorkspaceId)?.path ?? ''
 
   useEffect(() => {
     const offOut = window.dsh.terminal.onOutput((o) => {

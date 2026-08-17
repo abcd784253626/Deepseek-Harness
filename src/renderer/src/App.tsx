@@ -16,6 +16,7 @@ import { TerminalPage } from './pages/TerminalPage'
 
 export default function App(): React.JSX.Element {
   const ready = useApp((s) => s.ready)
+  const bootError = useApp((s) => s.bootError)
   const page = useApp((s) => s.page)
   const immersive = useApp((s) => s.immersive)
   const activeTheme = useApp((s) => s.activeTheme)
@@ -45,11 +46,20 @@ export default function App(): React.JSX.Element {
 
   if (!ready) {
     return (
-      <div className="flex h-full items-center justify-center" style={{ background: 'var(--bg)' }}>
-        <div className="flex items-center gap-2 text-[13px] fg-2">
-          <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: 'var(--accent)' }} />
-          正在启动 DSH Desktop…
-        </div>
+      <div className="flex h-full flex-col items-center justify-center gap-3" style={{ background: 'var(--bg)' }}>
+        {bootError ? (
+          <>
+            <div className="text-[13px]" style={{ color: 'var(--danger)' }}>启动失败：{bootError}</div>
+            <button type="button" className="btn-pill primary" onClick={() => void useApp.getState().bootstrap()}>
+              重试
+            </button>
+          </>
+        ) : (
+          <div className="flex items-center gap-2 text-[13px] fg-2">
+            <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: 'var(--accent)' }} />
+            正在启动 DSH Desktop…
+          </div>
+        )}
       </div>
     )
   }

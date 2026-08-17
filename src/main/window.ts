@@ -46,11 +46,81 @@ export function createMainWindow(): BrowserWindow {
     }
     return { action: 'deny' }
   })
+
+  // 导航白名单：精确解析 URL，拒绝前缀匹配绕过（localhost.evil.com / userinfo 注入等）
+  const isAllowedNavigation = (url: string): boolean => {
+    try {
+      const parsed = new URL(url)
+      if (parsed.username || parsed.password) return false
+      if (parsed.protocol === 'file:') {
+        // 仅放行应用自带 renderer 目录
+        const appFile = parsed.pathname.replace(/\//g, '\\').toLowerCase()
+        return (
+          appFile.includes('\\out\\renderer\\') ||
+          appFile.endsWith('\\index.html')
+        )
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+      const host = parsed.hostname.toLowerCase()
+      return host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
+    } catch {
+      return false
+    }
+  }
+
   win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith('file://') && !url.startsWith('http://localhost')) {
+    if (!isAllowedNavigation(url)) {
       event.preventDefault()
       if (url.startsWith('http://') || url.startsWith('https://')) void shell.openExternal(url)
     }
+  })
+
+  // webview 客进程加固：仅放行内核 origin，外部链接交给系统浏览器
+  win.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.on('will-navigate', (event, url) => {
+      let allowed = false
+      try {
+        const parsed = new URL(url)
+        allowed =
+          parsed.protocol === 'http:' &&
+          (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')
+      } catch {
+        allowed = false
+      }
+      if (!allowed) {
+        event.preventDefault()
+        if (url.startsWith('http://') || url.startsWith('https://')) void shell.openExternal(url)
+      }
+    })
+    guest.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith('http://') || url.startsWith('https://')) void shell.openExternal(url)
+      return { action: 'deny' }
+    })
+  })
+
+  // webview 挂载校验：src/partition 白名单 + 强制移除特权能力
+  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    let srcOk = false
+    try {
+      const parsed = new URL(params.src ?? '')
+      srcOk =
+        parsed.protocol === 'http:' &&
+        (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') &&
+        !parsed.username &&
+        !parsed.password
+    } catch {
+      srcOk = false
+    }
+    const partitionOk = (params.partition ?? '') === 'persist:dsh-official'
+    if (!srcOk || !partitionOk || params.allowpopups) {
+      event.preventDefault()
+      return
+    }
+    // 无论渲染进程传什么，客进程一律无特权
+    delete webPreferences.preload
+    webPreferences.nodeIntegration = false
+    webPreferences.contextIsolation = true
+    webPreferences.sandbox = true
   })
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
