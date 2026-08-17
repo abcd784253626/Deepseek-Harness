@@ -7,7 +7,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const OWNER = 'abcd784253626'
-const REPO = '-deepseek-harness-'
+const REPO = 'Deepseek-Harness'
 const TAG = 'v0.1.0'
 const TOKEN = process.env.GH_TOKEN
 if (!TOKEN) {
@@ -17,6 +17,20 @@ if (!TOKEN) {
 
 const API = `https://api.github.com/repos/${OWNER}/${REPO}`
 const H = { Authorization: `Bearer ${TOKEN}`, Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-desktop-release' }
+
+/** 上传重定向跟随：307/308 时解析 location 并重发（Node fetch 跨源不自动重发 body） */
+async function uploadWithRedirect(url, headers, body) {
+  for (let hop = 0; hop < 5; hop++) {
+    const res = await fetch(url, { method: 'POST', headers, body })
+    if ((res.status === 307 || res.status === 308) && res.headers.get('location')) {
+      url = new URL(res.headers.get('location'), url).toString()
+      console.log('跟随重定向 →', url.slice(0, 120))
+      continue
+    }
+    return res
+  }
+  throw new Error('重定向次数过多')
+}
 
 async function main() {
   // 1. 创建/获取 Release
@@ -82,11 +96,11 @@ async function main() {
     let up = null
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        up = await fetch(`https://uploads.github.com/repos/${OWNER}/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(asset.name)}`, {
-          method: 'POST',
-          headers: { ...H, 'Content-Type': 'application/octet-stream' },
-          body: data
-        })
+        up = await uploadWithRedirect(
+          `https://uploads.github.com/repos/${OWNER}/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(asset.name)}`,
+          { ...H, 'Content-Type': 'application/octet-stream' },
+          data
+        )
         if (up.ok) break
         console.warn(`第 ${attempt} 次尝试 HTTP ${up.status}，重试...`)
       } catch (err) {
