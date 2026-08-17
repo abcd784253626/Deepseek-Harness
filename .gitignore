@@ -1,0 +1,8 @@
+node_modules/
+out/
+release/
+*.log
+.DS_Store
+resources/icon.png
+resources/icon.ico
+resources/tray.png
