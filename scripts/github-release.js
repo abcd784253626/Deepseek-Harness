@@ -22,10 +22,16 @@ if (!TOKEN) {
 const API = `https://api.github.com/repos/${OWNER}/${REPO}`
 const H = { Authorization: `Bearer ${TOKEN}`, Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-desktop-release' }
 
-/** 上传重定向跟随：307/308 时解析 location 并重发（Node fetch 跨源不自动重发 body） */
+/** 上传重定向跟随：307/308 时解析 location 并重发（Node fetch 跨源不自动重发 body）；
+ *  整体超时 10 分钟（大文件上传慢，默认 headersTimeout 不足） */
 async function uploadWithRedirect(url, headers, body) {
   for (let hop = 0; hop < 5; hop++) {
-    const res = await fetch(url, { method: 'POST', headers, body })
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body,
+      signal: AbortSignal.timeout(600_000)
+    })
     if ((res.status === 307 || res.status === 308) && res.headers.get('location')) {
       url = new URL(res.headers.get('location'), url).toString()
       console.log('跟随重定向 →', url.slice(0, 120))
@@ -96,9 +102,9 @@ async function main() {
     }
     const data = fs.readFileSync(filePath)
     console.log(`上传 ${asset.name} (${(data.length / 1024 / 1024).toFixed(1)}MB)...`)
-    // 分块上传失败自动重试 3 次
+    // 大文件上传失败自动重试 5 次（网络波动常见）
     let up = null
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 5; attempt++) {
       try {
         up = await uploadWithRedirect(
           `https://uploads.github.com/repos/${OWNER}/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(asset.name)}`,
