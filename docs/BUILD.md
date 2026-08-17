@@ -50,6 +50,7 @@ electron-builder 配置（package.json `build` 字段）要点：
 
 | 问题 | 处理 |
 |------|------|
+| 安装包双击崩溃（事件日志：System.dll 访问违例 0xc0000005） | **NSIS 3.0.4.1 的已知缺陷：安装包所在路径含非 ASCII 字符（如中文目录）时 System.dll 崩溃**。把安装包复制到纯英文路径（如 `C:\`、`D:\downloads`）再运行即可；安装目标目录不受影响。便携版无此问题，中文路径下直接运行 |
 | electron 二进制下载超时 | `.npmrc` 已配 npmmirror；重跑 `npm install` |
 | better-sqlite3 ABI 不匹配 | `npm run rebuild:native`（自动按 electron 版本下载预编译） |
 | 签名警告 | 未配置证书属正常；生产发布建议购买 EV 签名 |

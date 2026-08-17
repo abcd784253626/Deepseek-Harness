@@ -39,6 +39,9 @@ npm run package        # NSIS 安装包 (release/)
 npm run package:portable   # 便携版 exe
 ```
 
+> ⚠️ **安装包注意**：NSIS 安装包所在**路径不能含中文**（内置 NSIS 3.0.4.1 的 System.dll 缺陷，双击会崩）——
+> 请把安装包复制到纯英文路径（如 `C:\`、`D:\downloads`）后运行；**便携版无此限制**，中文路径直接双击即可。
+
 > 国内网络：`.npmrc` 已配置 Electron / electron-builder / better-sqlite3 镜像。
 
 ## 目录结构
