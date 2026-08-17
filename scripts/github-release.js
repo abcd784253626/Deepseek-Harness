@@ -1,0 +1,106 @@
+/**
+ * 创建 GitHub Release 并上传安装包资产
+ * 用法: node scripts/github-release.js
+ * 环境: GH_TOKEN（GCM 提取的 PAT）
+ */
+const fs = require('node:fs')
+const path = require('node:path')
+
+const OWNER = 'abcd784253626'
+const REPO = '-deepseek-harness-'
+const TAG = 'v0.1.0'
+const TOKEN = process.env.GH_TOKEN
+if (!TOKEN) {
+  console.error('缺少 GH_TOKEN')
+  process.exit(1)
+}
+
+const API = `https://api.github.com/repos/${OWNER}/${REPO}`
+const H = { Authorization: `Bearer ${TOKEN}`, Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-desktop-release' }
+
+async function main() {
+  // 1. 创建/获取 Release
+  let release = await fetch(`${API}/releases/tags/${TAG}`, { headers: H })
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+  if (!release) {
+    const created = await fetch(`${API}/releases`, {
+      method: 'POST',
+      headers: { ...H, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tag_name: TAG,
+        name: 'DSH Desktop v0.1.0',
+        body: [
+          '## DSH Desktop v0.1.0 — DeepSeek Harness Windows 桌面客户端',
+          '',
+          '- 基于官方 DeepSeek Harness（MIT）封装的 Windows 原生桌面应用，无浏览器运行',
+          '- 插件安装市场（GitHub topic + npm 双源、一键装卸、版本回滚、安全扫描）',
+          '- 皮肤系统（3 套预设 + 可视化编辑器 + .dsh-theme 导入导出 + 自定义 CSS）',
+          '- 壁纸系统（本地磁盘图片搜索、全格式识别）',
+          '- 官方版本实时更新检查、API 凭据本地加密存储',
+          '- 完整架构文档：docs/（架构 / 构建 / 插件开发 / 主题开发）',
+          '',
+          '### 安装说明',
+          '- `DSH-Desktop-0.1.0-x64.exe`：NSIS 安装包（请复制到纯英文路径后运行，见 BUILD.md）',
+          '- `DSH-Desktop-0.1.0-portable-x64.exe`：便携版，解压即用（中文路径可直接运行）',
+          '- 前置要求：Node.js 18+、`npm install -g @deepseek-ai/dsh`、pnpm'
+        ].join('\n')
+      })
+    })
+    if (!created.ok) {
+      console.error('创建 Release 失败:', created.status, await created.text())
+      process.exit(1)
+    }
+    release = await created.json()
+  }
+  console.log('Release:', release.html_url)
+
+  // 2. 上传资产
+  const assets = [
+    { file: 'release/DSH-Desktop-0.1.0-x64.exe', name: 'DSH-Desktop-0.1.0-x64.exe' },
+    { file: 'release/DSH-Desktop-0.1.0-portable-x64.exe', name: 'DSH-Desktop-0.1.0-portable-x64.exe' }
+  ]
+  for (const asset of assets) {
+    const filePath = path.join(__dirname, '..', asset.file)
+    if (!fs.existsSync(filePath)) {
+      console.warn('跳过缺失资产:', asset.file)
+      continue
+    }
+    // 跳过已存在的同名资产
+    const existing = await fetch(`${API}/releases/${release.id}/assets`, { headers: H }).then((r) => r.json())
+    if (Array.isArray(existing) && existing.some((a) => a.name === asset.name)) {
+      console.log('已存在，跳过:', asset.name)
+      continue
+    }
+    const data = fs.readFileSync(filePath)
+    console.log(`上传 ${asset.name} (${(data.length / 1024 / 1024).toFixed(1)}MB)...`)
+    // 分块上传失败自动重试 3 次
+    let up = null
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        up = await fetch(`https://uploads.github.com/repos/${OWNER}/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(asset.name)}`, {
+          method: 'POST',
+          headers: { ...H, 'Content-Type': 'application/octet-stream' },
+          body: data
+        })
+        if (up.ok) break
+        console.warn(`第 ${attempt} 次尝试 HTTP ${up.status}，重试...`)
+      } catch (err) {
+        console.warn(`第 ${attempt} 次尝试网络错误: ${err.cause?.code ?? err.message}，重试...`)
+      }
+      await new Promise((r) => setTimeout(r, 3000 * attempt))
+    }
+    if (!up || !up.ok) {
+      console.error('上传失败:', up ? `${up.status} ${(await up.text()).slice(0, 200)}` : '网络错误')
+      process.exit(1)
+    }
+    const info = await up.json()
+    console.log('✓', info.browser_download_url)
+  }
+  console.log('完成:', release.html_url)
+}
+
+main().catch((e) => {
+  console.error('FAIL', e.message)
+  process.exit(1)
+})
