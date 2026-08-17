@@ -5,8 +5,6 @@
  * + 本地存储 + IPC 鉴权中转。
  */
 import { app, BrowserWindow } from 'electron'
-import { join } from 'node:path'
-import { existsSync } from 'node:fs'
 import { registerIpc } from './ipc'
 import { createMainWindow, getMainWindow, destroyMainWindow, requestClose } from './window'
 import { installMenu } from './menu'
@@ -77,7 +75,3 @@ function getMainWindowProxyClose(): void {
     })
   })
 }
-
-// 渲染进程开发期注入的 ELECTRON_RENDERER_URL 由 window.ts 使用
-void join
-void existsSync
