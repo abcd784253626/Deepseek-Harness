@@ -44,12 +44,7 @@ import { getMainWindow, toggleMaximize, minimizeWindow, requestClose, isMaximize
 import { homedir } from 'node:os'
 import { scanForImages, listLocalDrives, defaultImageDirs } from './wallpaper/scanner'
 import { checkDshUpdate } from './updates'
-import {
-  getAliyunConfig,
-  saveAliyunConfig,
-  testAliyunConnection,
-  ALIYUN_MODELS
-} from './aliyun'
+import { writeUiThemePreference } from './theme-sync'
 import { getSettings as getSettingsStore } from './store/database'
 
 export function registerIpc(): void {
@@ -233,7 +228,11 @@ export function registerIpc(): void {
 
   // ─── 主题 ────────────────────────────────────────────────
   ipcMain.handle(IPC.themes.list, () => allThemes())
-  ipcMain.handle(IPC.themes.apply, (_e, id: string) => applyTheme(id))
+  ipcMain.handle(IPC.themes.apply, (_e, id: string) => {
+    const theme = applyTheme(id)
+    if (theme) writeUiThemePreference(theme.type) // 官方 UI 明暗与桌面主题统一
+    return theme
+  })
   ipcMain.handle(IPC.themes.save, (_e, theme) => saveUserTheme(theme))
   ipcMain.handle(IPC.themes.remove, (_e, id: string) => removeUserTheme(id))
   ipcMain.handle(IPC.themes.export, async (_e, id: string) => {
@@ -303,7 +302,8 @@ export function registerIpc(): void {
 
   // ─── 壁纸 ────────────────────────────────────────────────
   ipcMain.handle(IPC.wallpaper.search, async (_e, roots?: string[]) => {
-    const effective = roots?.length ? roots : await defaultImageDirs().length ? defaultImageDirs() : await listLocalDrives()
+    // 未指定目录时扫描全部本地固定盘（图片/桌面/下载等目录都在其中）
+    const effective = roots?.length ? roots : await listLocalDrives()
     const result = await scanForImages(
       { roots: effective },
       (progress) => wc()?.send(IPC.wallpaper.onProgress, progress)
@@ -330,14 +330,6 @@ export function registerIpc(): void {
     const binary = resolveDsh(settings.dshPathOverride)
     return checkDshUpdate(binary?.version ?? null)
   })
-
-  // ─── 阿里百炼 ────────────────────────────────────────────
-  ipcMain.handle(IPC.aliyun.get, () => ({ config: getAliyunConfig(), models: ALIYUN_MODELS }))
-  ipcMain.handle(IPC.aliyun.save, (_e, apiKey: string | null, model: string) => {
-    if (!ALIYUN_MODELS.some((m) => m.id === model)) throw new Error('未知模型')
-    return saveAliyunConfig(apiKey?.trim() || null, model)
-  })
-  ipcMain.handle(IPC.aliyun.test, (_e, model: string) => testAliyunConnection(model))
 
   // ─── 开机自启 ────────────────────────────────────────────
   ipcMain.handle(IPC.app.setOpenAtLogin, (_e, enabled: boolean) => {

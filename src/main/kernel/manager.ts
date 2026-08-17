@@ -19,6 +19,8 @@ import { join } from 'node:path'
 import type { KernelLogLevel, KernelLogLine, KernelState, KernelStatus, WorkspaceInfo } from '@shared/types'
 import { getSettings, getWorkspace } from '../store/database'
 import { readCredential, listCredentials } from '../security'
+import { getThemeSafe } from '../themes/manager'
+import { writeUiThemePreference } from '../theme-sync'
 import { resolveDsh, resolveSystemNode } from './resolver'
 
 const MAX_LOG_LINES = 2000
@@ -195,6 +197,10 @@ export class KernelManager extends EventEmitter {
 
     // 先应用当前模式（settings.yaml 由官方读取）
     this.applyModeToSettings(settings.lastMode, dshHome)
+
+    // 官方 UI 明暗偏好与桌面主题统一（settings.yaml 的 ui-theme.preference）
+    const activeTheme = getThemeSafe(settings.themeId)
+    if (activeTheme) writeUiThemePreference(activeTheme.type)
 
     let port: number
     try {

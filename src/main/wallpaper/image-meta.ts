@@ -8,8 +8,6 @@ export const IMAGE_EXTS: ReadonlySet<string> = new Set([
   '.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.tif', '.tiff', '.ico'
 ])
 
-const MAX_HEADER = 64 * 1024
-
 export function extOf(path: string): string {
   const idx = path.lastIndexOf('.')
   if (idx < 0) return ''
@@ -60,7 +58,8 @@ export function readImageMeta(path: string): ImageMeta | null {
     return null
   }
   try {
-    const buf = Buffer.alloc(Math.min(MAX_HEADER, 4096))
+    // 16KB 头：覆盖 JPEG EXIF/DQT 段导致 SOF 偏移较大的情况
+    const buf = Buffer.alloc(16 * 1024)
     const n = readSync(fd, buf, 0, buf.length, 0)
     const head = buf.subarray(0, n)
     const format = formatOf(head)

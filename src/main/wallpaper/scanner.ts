@@ -19,7 +19,7 @@ const EXCLUDED_DIR_NAMES = new Set([
 
 const MAX_DEPTH = 8
 const MAX_FILE_BYTES = 30 * 1024 * 1024
-const MAX_RESULTS = 500
+const MAX_RESULTS = 2000
 
 export interface ScanOptions {
   roots?: string[]
@@ -31,6 +31,8 @@ export interface ScanProgress {
   scanned: number
   found: number
   currentDir: string
+  /** 各格式计数（如 jpeg: 12, png: 8） */
+  counts: Record<string, number>
 }
 
 /** 枚举本地固定盘根 */
@@ -67,11 +69,23 @@ export function defaultImageDirs(): string[] {
   })
 }
 
+/** 去重/去嵌套：若某 root 已被另一 root 覆盖则丢弃（避免重复扫描） */
+function dedupeRoots(roots: string[]): string[] {
+  const normalized = roots.map((r) => r.replace(/[\\/]+$/, '') + '\\').sort((a, b) => a.length - b.length)
+  const kept: string[] = []
+  for (const root of normalized) {
+    if (kept.some((k) => root.toLowerCase().startsWith(k.toLowerCase()))) continue
+    kept.push(root)
+  }
+  return kept.map((r) => r.replace(/\\$/, ''))
+}
+
 export async function scanForImages(options: ScanOptions = {}, onProgress?: (p: ScanProgress) => void): Promise<WallpaperInfo[]> {
-  let roots = options.roots?.length ? options.roots : await listLocalDrives()
+  let roots = options.roots?.length ? dedupeRoots(options.roots) : await listLocalDrives()
   const maxDepth = options.maxDepth ?? MAX_DEPTH
   const maxResults = options.maxResults ?? MAX_RESULTS
   const found: WallpaperInfo[] = []
+  const counts: Record<string, number> = {}
   let scanned = 0
 
   const yieldLoop = (): Promise<void> =>
@@ -79,8 +93,14 @@ export async function scanForImages(options: ScanOptions = {}, onProgress?: (p: 
 
   const pushResult = (info: WallpaperInfo): void => {
     found.push(info)
+    counts[info.format] = (counts[info.format] ?? 0) + 1
     found.sort((a, b) => b.modifiedAt - a.modifiedAt)
-    if (found.length > maxResults) found.length = maxResults
+    if (found.length > maxResults) {
+      // 截断时同步回收计数
+      const dropped = found.slice(maxResults)
+      for (const d of dropped) counts[d.format] = Math.max(0, (counts[d.format] ?? 1) - 1)
+      found.length = maxResults
+    }
   }
 
   const walk = async (dir: string, depth: number): Promise<boolean> => {
@@ -96,7 +116,7 @@ export async function scanForImages(options: ScanOptions = {}, onProgress?: (p: 
       if (found.length >= maxResults) return true
       scanned += 1
       if (scanned % 150 === 0) {
-        onProgress?.({ scanned, found: found.length, currentDir: dir })
+        onProgress?.({ scanned, found: found.length, currentDir: dir, counts: { ...counts } })
         await yieldLoop()
       }
       if (entry.isDirectory()) {
@@ -136,7 +156,7 @@ export async function scanForImages(options: ScanOptions = {}, onProgress?: (p: 
     const done = await walk(root, 0)
     if (done) break
   }
-  onProgress?.({ scanned, found: found.length, currentDir: '' })
+  onProgress?.({ scanned, found: found.length, currentDir: '', counts })
   return found
 }
 

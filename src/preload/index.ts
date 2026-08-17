@@ -128,8 +128,8 @@ const api = {
     get: (): Promise<string> => send(IPC.wallpaper.get) as Promise<string>,
     clear: (): Promise<DesktopSettings> => send(IPC.wallpaper.clear) as Promise<DesktopSettings>,
     opacity: (opacity: number): Promise<number> => send(IPC.wallpaper.opacity, opacity) as Promise<number>,
-    onProgress: (cb: (p: { scanned: number; found: number; currentDir: string }) => void): (() => void) => {
-      const listener = (_e: Electron.IpcRendererEvent, p: { scanned: number; found: number; currentDir: string }): void => cb(p)
+    onProgress: (cb: (p: { scanned: number; found: number; currentDir: string; counts: Record<string, number> }) => void): (() => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, p: { scanned: number; found: number; currentDir: string; counts: Record<string, number> }): void => cb(p)
       ipcRenderer.on(IPC.wallpaper.onProgress, listener)
       return () => ipcRenderer.removeListener(IPC.wallpaper.onProgress, listener)
     }
@@ -137,14 +137,6 @@ const api = {
   update: {
     check: (): Promise<{ local: string | null; latest: string | null; outdated: boolean; publishedAt: string | null; error: string | null }> =>
       send(IPC.update.check) as Promise<{ local: string | null; latest: string | null; outdated: boolean; publishedAt: string | null; error: string | null }>
-  },
-  aliyun: {
-    get: (): Promise<{ config: { enabled: boolean; apiKeyId: string; model: string; modelLabel: string }; models: Array<{ id: string; name: string }> }> =>
-      send(IPC.aliyun.get) as Promise<{ config: { enabled: boolean; apiKeyId: string; model: string; modelLabel: string }; models: Array<{ id: string; name: string }> }>,
-    save: (apiKey: string | null, model: string): Promise<{ enabled: boolean; apiKeyId: string; model: string; modelLabel: string }> =>
-      send(IPC.aliyun.save, apiKey, model) as Promise<{ enabled: boolean; apiKeyId: string; model: string; modelLabel: string }>,
-    test: (model: string): Promise<{ ok: boolean; latencyMs: number; model: string; reply: string | null; error: string | null }> =>
-      send(IPC.aliyun.test, model) as Promise<{ ok: boolean; latencyMs: number; model: string; reply: string | null; error: string | null }>
   },
   terminal: {
     run: (args: string[], cwd: string): Promise<TerminalSession> => send(IPC.terminal.run, args, cwd) as Promise<TerminalSession>,

@@ -315,11 +315,6 @@ export const IPC = {
   update: {
     check: 'update:check'
   },
-  aliyun: {
-    save: 'aliyun:save',
-    test: 'aliyun:test',
-    get: 'aliyun:get'
-  },
   terminal: {
     run: 'terminal:run',
     kill: 'terminal:kill',

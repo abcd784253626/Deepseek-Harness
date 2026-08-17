@@ -1,5 +1,5 @@
 /**
- * 设置页：常规、壁纸、官方更新、阿里百炼、内核路径、凭据、配置互通、关于
+ * 设置页：常规、壁纸、官方更新、内核路径、API 凭据、配置互通、关于
  */
 import { useEffect, useState } from 'react'
 import {
@@ -14,17 +14,11 @@ import {
   Search,
   X as XIcon,
   RefreshCw,
-  Rocket,
-  Cloud
+  Rocket
 } from 'lucide-react'
 import { useApp } from '../stores/app'
 import { Badge, Button, Segmented, Switch } from '../components/ui'
 import type { CredentialEntry, WallpaperInfo } from '@shared/types'
-
-interface AliyunInfo {
-  config: { enabled: boolean; apiKeyId: string; model: string; modelLabel: string }
-  models: Array<{ id: string; name: string }>
-}
 
 interface UpdateInfo {
   local: string | null
@@ -56,17 +50,9 @@ export function SettingsPage(): React.JSX.Element {
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateLog, setUpdateLog] = useState<string[]>([])
 
-  // 阿里百炼状态
-  const [aliyun, setAliyun] = useState<AliyunInfo | null>(null)
-  const [aliyunKey, setAliyunKey] = useState('')
-  const [aliyunModel, setAliyunModel] = useState('qwen-max')
-  const [aliyunTesting, setAliyunTesting] = useState(false)
-  const [aliyunTestResult, setAliyunTestResult] = useState<string | null>(null)
-
   useEffect(() => {
     void window.dsh.credentials.list().then(setCredentials)
     if (settings) setKernelPortText(String(settings.kernelPort))
-    void window.dsh.aliyun.get().then(setAliyun)
   }, [settings])
 
   const addCredential = async (): Promise<void> => {
@@ -87,13 +73,18 @@ export function SettingsPage(): React.JSX.Element {
     setWpProgress('正在扫描磁盘图片…')
     setWpResults([])
     const off = window.dsh.wallpaper.onProgress((p) => {
-      setWpProgress(`已扫描 ${p.scanned} 个条目，找到 ${p.found} 张图片${p.currentDir ? `（${p.currentDir}）` : ''}`)
+      const counts = p.counts
+        ? Object.entries(p.counts)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(' · ')
+        : ''
+      setWpProgress(`已扫描 ${p.scanned} 个条目，找到 ${p.found} 张图片${counts ? `（${counts}）` : ''}${p.currentDir ? ` — ${p.currentDir}` : ''}`)
     })
     try {
       const roots = wpScope === 'custom' && wpCustomDir ? [wpCustomDir] : undefined
       const list = await window.dsh.wallpaper.search(roots)
       setWpResults(list)
-      setWpProgress(`搜索完成：共 ${list.length} 张图片（已按修改时间倒序）`)
+      setWpProgress(`搜索完成：共 ${list.length} 张图片（按修改时间倒序，含 jpg/png/gif/bmp/webp/tiff/ico）`)
     } catch (err) {
       setWpProgress(`搜索失败：${(err as Error).message}`)
     } finally {
@@ -128,31 +119,6 @@ export function SettingsPage(): React.JSX.Element {
     })
     const s = await window.dsh.terminal.run(['npm', 'install', '-g', '@deepseek-ai/dsh@latest'], '')
     setUpdateLog((prev) => [...prev, `npm install -g @deepseek-ai/dsh@latest (session ${s.id})`])
-  }
-
-  const saveAliyun = async (): Promise<void> => {
-    setNotice(null)
-    if (!aliyunKey.trim() && !aliyun?.config.enabled) {
-      setNotice('请先输入阿里百炼 API Key（sk- 开头）')
-      return
-    }
-    const config = await window.dsh.aliyun.save(aliyunKey.trim() || null, aliyunModel)
-    setAliyunKey('')
-    setAliyun({ config, models: aliyun?.models ?? [] })
-    setNotice(`阿里百炼已配置（${config.modelLabel}）。密钥经 DPAPI 加密存储，重启内核后官方 UI 可选该模型。`)
-    void window.dsh.kernel.restart(useApp.getState().activeWorkspaceId)
-  }
-
-  const testAliyun = async (): Promise<void> => {
-    setAliyunTesting(true)
-    setAliyunTestResult(null)
-    const result = await window.dsh.aliyun.test(aliyunModel)
-    setAliyunTesting(false)
-    if (result.ok) {
-      setAliyunTestResult(`✓ 连接成功（${result.latencyMs}ms）模型 ${result.model} 回复：${result.reply ?? ''}`)
-    } else {
-      setAliyunTestResult(`✗ 连接失败：${result.error ?? '未知错误'}`)
-    }
   }
 
   return (
@@ -255,7 +221,7 @@ export function SettingsPage(): React.JSX.Element {
             <div className="flex flex-wrap items-center gap-2">
               <Segmented
                 options={[
-                  { value: 'auto', label: '自动（用户图片/桌面/下载 + 全部磁盘）' },
+                  { value: 'auto', label: '全部磁盘' },
                   { value: 'custom', label: '指定目录' }
                 ]}
                 value={wpScope}
@@ -353,68 +319,6 @@ export function SettingsPage(): React.JSX.Element {
           </div>
         </section>
 
-        {/* 阿里百炼 */}
-        <section className="flex flex-col gap-3">
-          <h2 className="flex items-center gap-1.5 text-[14px] font-medium" style={{ color: 'var(--fg)' }}>
-            <Cloud size={14} /> 阿里百炼（通义千问）
-            <span className="text-[11px] font-normal fg-3">DashScope 兼容协议接入，配置写入官方 settings.yaml，与原生 DSH 互通</span>
-          </h2>
-          <div className="flex flex-col gap-3 rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)' }}>
-            <div className="flex items-center gap-2">
-              <Badge tone={aliyun?.config.enabled ? 'success' : 'neutral'}>
-                {aliyun?.config.enabled ? `已配置 · ${aliyun.config.modelLabel}` : '未配置'}
-              </Badge>
-              {aliyun?.config.enabled && <span className="text-[11px] fg-3">重启内核后可在官方 UI 会话中选择该模型</span>}
-            </div>
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
-                <input
-                  className="input-pill flex-1 font-mono"
-                  type="password"
-                  placeholder="阿里百炼 API Key（sk- 开头，DPAPI 加密存储，绝不落盘明文）"
-                  value={aliyunKey}
-                  onChange={(e) => setAliyunKey(e.target.value)}
-                />
-                <select
-                  className="input-pill !w-52 !py-2 text-[12px]"
-                  value={aliyunModel}
-                  onChange={(e) => setAliyunModel(e.target.value)}
-                >
-                  {(aliyun?.models ?? []).map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button small variant="primary" onClick={() => void saveAliyun()}>
-                  <KeyRound size={12} /> 保存配置
-                </Button>
-                <Button small disabled={aliyunTesting} onClick={() => void testAliyun()}>
-                  {aliyunTesting ? '测试中…' : '测试连接（真实对话）'}
-                </Button>
-                <Button small onClick={() => void window.dsh.app.openExternal('https://bailian.console.aliyun.com/')}>
-                  获取 Key（百炼控制台）
-                </Button>
-              </div>
-            </div>
-            {aliyunTestResult && (
-              <div
-                className="rounded-lg px-3 py-2 text-[12px] leading-relaxed"
-                style={{
-                  color: aliyunTestResult.startsWith('✓') ? 'var(--success)' : 'var(--danger)',
-                  background: 'var(--bg-subtle)'
-                }}
-              >
-                {aliyunTestResult}
-              </div>
-            )}
-            <p className="text-[11px] fg-3">
-              模型配置示例（官方格式）：settings.yaml 中的 llm-aliyun.providers.aliyun（openai-completions 协议，
-              baseURL {`https://dashscope.aliyuncs.com/compatible-mode/v1`}）。密钥以环境变量 DASHSCOPE_API_KEY 注入内核。
-            </p>
-          </div>
-        </section>
-
         {/* 内核与运行环境 */}
         <section className="flex flex-col gap-3">
           <h2 className="text-[14px] font-medium" style={{ color: 'var(--fg)' }}>内核与运行环境</h2>
@@ -489,7 +393,11 @@ export function SettingsPage(): React.JSX.Element {
               </Button>
             </div>
           </div>
-          <p className="text-[11px] fg-3">保存的凭据会写入 DSH_HOME/.credentials.yaml（官方格式），内核启动时自动注入对应环境变量。</p>
+          <p className="text-[11px] fg-3">
+            保存的凭据经 Windows DPAPI 加密存储（绝不上传、不落盘明文），内核每次启动时自动解密并注入为同名环境变量
+            （如保存键 DASHSCOPE_API_KEY → 注入 DASHSCOPE_API_KEY）。官方模型的 apiKeyEnv 指向该键即可接入任意
+            兼容 API（DeepSeek / 阿里百炼 / OpenAI 等），配置格式与原生 DSH 完全互通。
+          </p>
         </section>
 
         {/* 配置互通 */}
