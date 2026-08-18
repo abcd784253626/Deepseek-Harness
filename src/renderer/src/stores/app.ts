@@ -9,6 +9,7 @@ import type {
   DesktopSettings,
   KernelState,
   ThemeDefinition,
+  UsageSummary,
   WorkspaceInfo
 } from '@shared/types'
 
@@ -26,6 +27,7 @@ interface AppState {
   workspaces: WorkspaceInfo[]
   activeWorkspaceId: string | null
   modes: AgentModeInfo[]
+  usage: UsageSummary | null
   page: Page
   immersive: boolean
   commandPaletteOpen: boolean
@@ -41,6 +43,7 @@ interface AppState {
   setActiveWorkspace: (id: string | null) => Promise<void>
   saveSettings: (patch: Partial<DesktopSettings>) => Promise<void>
   setCustomCss: (css: string) => Promise<void>
+  refreshUsage: () => Promise<void>
 }
 
 /** 跟随系统时：取与系统明暗一致的已存主题，否则回退主题 id */
@@ -71,6 +74,7 @@ export const useApp = create<AppState>((set, get) => ({
   workspaces: [],
   activeWorkspaceId: null,
   modes: [],
+  usage: null,
   page: 'chat',
   immersive: false,
   commandPaletteOpen: false,
@@ -113,6 +117,9 @@ export const useApp = create<AppState>((set, get) => ({
     // 内核状态订阅
     window.dsh.kernel.onState((s) => set({ kernel: s }))
     void get().refreshKernel()
+    // 用量统计订阅（内核投影缓存变化时主进程主动推送）
+    window.dsh.usage.onUpdate((s) => set({ usage: s }))
+    void get().refreshUsage()
   },
 
   setPage: (page) => set({ page, commandPaletteOpen: false }),
@@ -169,5 +176,10 @@ export const useApp = create<AppState>((set, get) => ({
   setCustomCss: async (css) => {
     await window.dsh.themes.setCss(css)
     set({ customCss: css })
+  },
+
+  refreshUsage: async () => {
+    const usage = await window.dsh.usage.get()
+    set({ usage })
   }
 }))

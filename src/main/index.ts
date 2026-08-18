@@ -12,6 +12,7 @@ import { installMenu } from './menu'
 import { installTray, destroyTray } from './tray'
 import { kernelManager } from './kernel/manager'
 import { getSettings } from './store/database'
+import { usageTracker } from './usage/tracker'
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -66,6 +67,8 @@ function bootstrap(): void {
     registerImageProtocol()
     createMainWindow()
     installTray()
+    // 用量跟踪：监听官方会话投影缓存并推送更新
+    usageTracker.start()
     // 清理过期插件市场缓存
     try {
       const { getDb, prunePluginCache } = require('./store/database') as typeof import('./store/database')
@@ -92,6 +95,7 @@ function bootstrap(): void {
   // minimizeToTray=true 时 app.quit() 会被 close 拦截变成"隐藏到托盘"）
   app.on('before-quit', () => {
     isQuitting = true
+    usageTracker.stop()
     kernelManager.dispose()
     destroyTray()
   })

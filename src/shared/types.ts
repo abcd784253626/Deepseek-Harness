@@ -194,6 +194,61 @@ export interface DesktopSettings {
   wallpaperOpacity: number
   /** 开机自启 */
   openAtLogin: boolean
+  /** 用量估算计价：输入（未命中缓存）¥/百万 tokens */
+  usagePriceInput: number
+  /** 用量估算计价：缓存命中 ¥/百万 tokens */
+  usagePriceCache: number
+  /** 用量估算计价：输出 ¥/百万 tokens */
+  usagePriceOutput: number
+}
+
+// ─── 用量统计（会话投影缓存 → 用量面板） ────────────────────────
+
+/** 三类 token 计数（与官方 tokenUsage 投影一致） */
+export interface UsageTotals {
+  /** 未命中缓存的输入 tokens */
+  inputTokens: number
+  /** 命中缓存的输入 tokens（cacheRead） */
+  cacheReadTokens: number
+  /** 输出 tokens */
+  outputTokens: number
+}
+
+/** 按计价折算的金额（元，估算） */
+export interface UsageCost {
+  input: number
+  cacheRead: number
+  output: number
+  /** 合计 */
+  total: number
+}
+
+/** 单个会话的用量快照 */
+export interface UsageSession {
+  id: string
+  title: string | null
+  /** 工作区路径（identity.cwd） */
+  cwd: string
+  createdAt: number
+  /** 最近一次发送提示的时间（null = 从未发送） */
+  lastPromptAt: number | null
+  totals: UsageTotals
+  cost: UsageCost
+}
+
+export interface UsageSummary {
+  generatedAt: number
+  /** 今日有活动的会话（近似：lastPromptAt/createdAt 落在今天） */
+  today: { totals: UsageTotals; cost: UsageCost }
+  /** 全部会话累计 */
+  total: { totals: UsageTotals; cost: UsageCost }
+  /** 按工作区归并（cwd 首字母去重） */
+  workspaces: Array<{ path: string; label: string; sessionCount: number; totals: UsageTotals; cost: UsageCost }>
+  /** 有实际用量的会话（降序：最近活跃在前） */
+  sessions: UsageSession[]
+  sessionCount: number
+  /** 生效中的计价（元 / 百万 tokens） */
+  pricing: { input: number; cacheRead: number; output: number }
 }
 
 // ─── 凭据（API Key，经 safeStorage 加密） ──────────────────────
@@ -314,6 +369,10 @@ export const IPC = {
   },
   update: {
     check: 'update:check'
+  },
+  usage: {
+    get: 'usage:get',
+    onUpdate: 'usage:on-update'
   },
   terminal: {
     run: 'terminal:run',

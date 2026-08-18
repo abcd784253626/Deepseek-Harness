@@ -19,6 +19,7 @@ import type {
   RegistryPlugin,
   TerminalSession,
   ThemeDefinition,
+  UsageSummary,
   WallpaperInfo,
   WorkspaceInfo
 } from '@shared/types'
@@ -151,6 +152,14 @@ const api = {
   update: {
     check: (): Promise<{ local: string | null; latest: string | null; outdated: boolean; publishedAt: string | null; error: string | null }> =>
       send(IPC.update.check) as Promise<{ local: string | null; latest: string | null; outdated: boolean; publishedAt: string | null; error: string | null }>
+  },
+  usage: {
+    get: (): Promise<UsageSummary> => send(IPC.usage.get) as Promise<UsageSummary>,
+    onUpdate: (cb: (s: UsageSummary) => void): (() => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, s: UsageSummary): void => cb(s)
+      ipcRenderer.on(IPC.usage.onUpdate, listener)
+      return () => ipcRenderer.removeListener(IPC.usage.onUpdate, listener)
+    }
   },
   terminal: {
     run: (args: string[], cwd: string): Promise<TerminalSession> => send(IPC.terminal.run, args, cwd) as Promise<TerminalSession>,

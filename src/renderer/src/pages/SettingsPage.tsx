@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 import { useApp } from '../stores/app'
 import { Badge, Button, RangeSlider, Segmented, Switch } from '../components/ui'
-import type { CredentialEntry, WallpaperInfo } from '@shared/types'
+import type { CredentialEntry, DesktopSettings, WallpaperInfo } from '@shared/types'
 
 interface UpdateInfo {
   local: string | null
@@ -415,6 +415,46 @@ export function SettingsPage(): React.JSX.Element {
             （如保存键 DASHSCOPE_API_KEY → 注入 DASHSCOPE_API_KEY）。官方模型的 apiKeyEnv 指向该键即可接入任意
             兼容 API（DeepSeek / 阿里百炼 / OpenAI 等），配置格式与原生 DSH 完全互通。
           </p>
+        </section>
+
+        {/* 用量与计费 */}
+        <section className="flex flex-col gap-3">
+          <h2 className="flex items-center gap-1.5 text-[14px] font-medium" style={{ color: 'var(--fg)' }}>
+            <RefreshCw size={14} /> 用量与计费
+            <span className="text-[11px] font-normal fg-3">左侧栏用量面板的金额估算参数（本地计算，不上传）</span>
+          </h2>
+          <div className="flex flex-col gap-2 rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)' }}>
+            <div className="grid grid-cols-3 gap-3">
+              {(
+                [
+                  { key: 'usagePriceInput', label: '输入（缓存未命中）', hint: '¥/百万 tokens' },
+                  { key: 'usagePriceCache', label: '输入（缓存命中）', hint: '¥/百万 tokens' },
+                  { key: 'usagePriceOutput', label: '输出', hint: '¥/百万 tokens' }
+                ] as const
+              ).map((f) => (
+                <div key={f.key} className="flex flex-col gap-1">
+                  <label className="text-[12px] fg-2">{f.label}</label>
+                  <input
+                    className="input-pill !w-full text-center font-mono text-[12px]"
+                    defaultValue={String(settings?.[f.key] ?? 0)}
+                    key={`${f.key}-${String(settings?.[f.key])}`}
+                    onBlur={(e) => {
+                      const v = Number.parseFloat(e.target.value)
+                      if (Number.isFinite(v) && v >= 0 && v !== settings?.[f.key]) {
+                        void saveSettings({ [f.key]: v } as Partial<DesktopSettings>)
+                      }
+                    }}
+                  />
+                  <span className="text-[10px] fg-3">{f.hint}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] fg-3">
+              默认按 DeepSeek V4-Flash 空闲时段官方价（输入 ¥1.5 / 缓存命中 ¥0.05 / 输出 ¥4.5 每百万 tokens，
+              2026-08-17 调价后）。实际费用与模型、时段（高峰 9:00–14:00 翻倍）、缓存命中率有关，此处为估算。
+              用量数据来自官方内核投影缓存，按会话累计；「今日」为今日有活动的会话（近似口径）。
+            </p>
+          </div>
         </section>
 
         {/* 配置互通 */}

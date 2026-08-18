@@ -47,6 +47,7 @@ import { invalidateImageAllowlist } from './wallpaper/protocol'
 import { checkDshUpdate } from './updates'
 import { writeUiThemePreference } from './theme-sync'
 import { getSettings as getSettingsStore } from './store/database'
+import { usageTracker } from './usage/tracker'
 
 export function registerIpc(): void {
   const wc = (): Electron.WebContents | null => getMainWindow()?.webContents ?? null
@@ -160,7 +161,8 @@ export function registerIpc(): void {
   const SETTINGS_KEYS = new Set([
     'followSystemTheme', 'themeId', 'autoStartKernel', 'minimizeToTray', 'kernelPort',
     'dshPathOverride', 'dshHomeOverride', 'lastWorkspaceId', 'lastMode', 'customCss',
-    'wallpaperPath', 'wallpaperOpacity', 'openAtLogin'
+    'wallpaperPath', 'wallpaperOpacity', 'openAtLogin',
+    'usagePriceInput', 'usagePriceCache', 'usagePriceOutput'
   ])
   ipcMain.handle(IPC.settings.get, () => getSettings())
   ipcMain.handle(IPC.settings.set, (_e, patch: Partial<DesktopSettings>) => {
@@ -398,6 +400,10 @@ export function registerIpc(): void {
     patchSettings({ wallpaperOpacity: clamped })
     return clamped
   })
+
+  // ─── 用量统计 ────────────────────────────────────────────
+  ipcMain.handle(IPC.usage.get, () => usageTracker.summary())
+  usageTracker.on('update', (summary) => wc()?.send(IPC.usage.onUpdate, summary))
 
   // ─── 官方版本更新检查 ────────────────────────────────────
   ipcMain.handle(IPC.update.check, () => {
