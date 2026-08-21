@@ -3,7 +3,7 @@
  */
 import { useEffect, useMemo } from 'react'
 import { useApp } from './stores/app'
-import { applyThemeToDocument } from './lib/theme'
+import { applyThemeToDocument, wallpaperUrlOf } from './lib/theme'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar'
 import { CommandPalette } from './components/CommandPalette'
@@ -33,11 +33,7 @@ export default function App(): React.JSX.Element {
   }, [activeTheme, customCss])
 
   // 壁纸背景
-  const wallpaperUrl = useMemo(() => {
-    const path = settings?.wallpaperPath
-    if (!path) return null
-    return `url(dsh-img://local/${encodeURIComponent(path).replace(/%2F/gi, '/')})`
-  }, [settings?.wallpaperPath])
+  const wallpaperUrl = useMemo(() => wallpaperUrlOf(settings?.wallpaperPath), [settings?.wallpaperPath])
 
   useEffect(() => {
     document.body.classList.toggle('has-wallpaper', Boolean(wallpaperUrl))

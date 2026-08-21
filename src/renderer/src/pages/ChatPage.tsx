@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ExternalLink, RefreshCw, Play, Square, Power } from 'lucide-react'
 import { useApp } from '../stores/app'
-import { buildWebviewThemeScript } from '../lib/theme'
+import { buildWebviewThemeScript, wallpaperUrlOf } from '../lib/theme'
 import { Badge, Button, Segmented } from '../components/ui'
 import type { AgentMode } from '@shared/types'
 
@@ -34,8 +34,10 @@ export function ChatPage(): React.JSX.Element {
   const [injectTick, setInjectTick] = useState(0)
   const themeRef = useRef(activeTheme)
   const cssRef = useRef(customCss)
+  const wallpaperRef = useRef<string | null>(null)
   themeRef.current = activeTheme
   cssRef.current = customCss
+  wallpaperRef.current = wallpaperUrlOf(settings?.wallpaperPath)
 
   const running = kernel?.status === 'running'
 
@@ -65,15 +67,15 @@ export function ChatPage(): React.JSX.Element {
     const wv = webviewRef.current
     if (!wv) return
     void wv
-      .executeJavaScript(buildWebviewThemeScript(activeTheme, customCss))
+      .executeJavaScript(buildWebviewThemeScript(activeTheme, customCss, wallpaperRef.current))
       .catch(() => setInjectTick((t) => t + 1))
     // 等 webview 存在后再注入（dom-ready 可能早于 ref 绑定）
     const timer = setTimeout(() => {
       const wv2 = webviewRef.current
-      if (wv2) void wv2.executeJavaScript(buildWebviewThemeScript(themeRef.current!, cssRef.current)).catch(() => undefined)
+      if (wv2) void wv2.executeJavaScript(buildWebviewThemeScript(themeRef.current!, cssRef.current, wallpaperRef.current)).catch(() => undefined)
     }, 400)
     return () => clearTimeout(timer)
-  }, [running, activeTheme, customCss, injectTick])
+  }, [running, activeTheme, customCss, injectTick, settings?.wallpaperPath, settings?.wallpaperOpacity])
 
   const changeMode = useCallback(
     async (mode: AgentMode) => {

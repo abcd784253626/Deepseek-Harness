@@ -4,6 +4,12 @@
  */
 import type { ThemeDefinition } from '@shared/types'
 
+/** 壁纸路径 → dsh-img:// 背景图 URL（空路径返回 null） */
+export function wallpaperUrlOf(path: string | null | undefined): string | null {
+  if (!path) return null
+  return `url("dsh-img://local/${encodeURIComponent(path).replace(/%2F/gi, '/')}")`
+}
+
 export function tokensToVars(t: ThemeDefinition['tokens']): Record<string, string> {
   return {
     '--bg': t.bg,
@@ -46,19 +52,24 @@ export function applyThemeToDocument(theme: ThemeDefinition, customCss: string):
  *     官方默认跟随 system 变灰，这里强制统一为桌面主题的明暗
  *  2. 用我们的令牌覆盖官方语义别名令牌（--dsw-alias-*），整站与桌面壳同色调
  *  3. 注入自定义 CSS
+ * wallpaperUrl 非空时：body 铺壁纸背景（cover 固定），主背景令牌半透明让壁纸透出。
  */
-export function buildWebviewThemeScript(theme: ThemeDefinition, customCss: string): string {
+export function buildWebviewThemeScript(theme: ThemeDefinition, customCss: string, wallpaperUrl: string | null = null): string {
   const t = theme.tokens
   const dark = theme.type === 'dark'
+  // 有壁纸时主背景令牌半透明（浮层/卡片保持不透明，保证可读性）
+  const bgBase = wallpaperUrl ? `color-mix(in srgb, ${t.bg} 84%, transparent)` : t.bg
+  const bgLayer1 = wallpaperUrl ? `color-mix(in srgb, ${t.bg} 88%, transparent)` : t.bg
+  const bgPlatform = wallpaperUrl ? `color-mix(in srgb, ${t.bgSubtle} 88%, transparent)` : t.bgSubtle
   // 官方 dsw 语义别名令牌 → 我们的令牌（浅色值；深色主题时用深色令牌）
   const alias = dark
     ? {
-        '--dsw-alias-bg-base': t.bg,
-        '--dsw-alias-bg-layer-1': t.bg,
+        '--dsw-alias-bg-base': bgBase,
+        '--dsw-alias-bg-layer-1': bgLayer1,
         '--dsw-alias-bg-layer-2': t.bgElevated,
         '--dsw-alias-bg-layer-3': t.bgElevated,
         '--dsw-alias-bg-overlay': t.bgElevated,
-        '--dsw-alias-bg-module-platform': t.bgSubtle,
+        '--dsw-alias-bg-module-platform': bgPlatform,
         '--dsw-alias-bg-multi-select': t.bgSubtle,
         '--dsw-alias-bg-skeleton': t.border,
         '--dsw-alias-label-primary': t.fg,
@@ -106,12 +117,12 @@ export function buildWebviewThemeScript(theme: ThemeDefinition, customCss: strin
       }
     : {
         // 浅色：整体换为纯净白 + 我们的强调色
-        '--dsw-alias-bg-base': t.bg,
-        '--dsw-alias-bg-layer-1': t.bg,
+        '--dsw-alias-bg-base': bgBase,
+        '--dsw-alias-bg-layer-1': bgLayer1,
         '--dsw-alias-bg-layer-2': t.bg,
         '--dsw-alias-bg-layer-3': t.bg,
         '--dsw-alias-bg-overlay': t.bgElevated,
-        '--dsw-alias-bg-module-platform': t.bgSubtle,
+        '--dsw-alias-bg-module-platform': bgPlatform,
         '--dsw-alias-bg-multi-select': t.bgSubtle,
         '--dsw-alias-bg-skeleton': t.border,
         '--dsw-alias-label-primary': t.fg,
@@ -175,6 +186,23 @@ html body {
   background: ${t.bg} !important;
   color: ${t.fg} !important;
   font-family: ${t.fontFamily} !important;
+}
+${
+  wallpaperUrl
+    ? `/* 壁纸：铺满官方 UI 背景（cover 固定，滚动不位移） */
+html body {
+  background-image: ${wallpaperUrl} !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+/* 官方 UI 可能的滚动根容器（#root 等）让位给 body 壁纸 */
+html body > #root,
+html body > #app {
+  background: transparent !important;
+}`
+    : ''
 }
 ${customCss}`
   const script = `(() => {

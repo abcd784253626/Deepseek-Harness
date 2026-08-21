@@ -184,3 +184,8 @@ body.has-wallpaper .titlebar-bg {
 body.has-wallpaper .app-page-bg {
   background: transparent !important;
 }
+/* 有壁纸时终端输出区半透明 + 毛玻璃，露出完整壁纸 */
+body.has-wallpaper .terminal-output {
+  background: color-mix(in srgb, var(--bg-subtle) 74%, transparent) !important;
+  backdrop-filter: blur(6px);
+}

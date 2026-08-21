@@ -98,7 +98,7 @@ export function TerminalPage(): React.JSX.Element {
 
       <div
         ref={outputRef}
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-2 font-mono text-[12px] leading-relaxed"
+        className="terminal-output min-h-0 flex-1 overflow-y-auto px-4 py-2 font-mono text-[12px] leading-relaxed"
         style={{ background: 'var(--bg-subtle)', color: 'var(--fg)' }}
       >
         {lines.length === 0 && <div className="fg-3">输出将显示在这里。也可直接输入命令：dsh --profile web --help</div>}
