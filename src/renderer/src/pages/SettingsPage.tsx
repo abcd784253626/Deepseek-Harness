@@ -75,6 +75,10 @@ export function SettingsPage(): React.JSX.Element {
 
   const wallpaperSrc = (path: string): string => `dsh-img://local/${encodeURIComponent(path).replace(/%2F/gi, '/')}`
   const currentWallpaper = settings?.wallpaperPath ?? ''
+  // 壁纸文字颜色模式：auto=跟随主题 / dark=深色 / light=浅色 / custom=自定义 hex
+  const wallpaperTextColor = settings?.wallpaperTextColor ?? ''
+  const wallpaperTextMode: 'auto' | 'dark' | 'light' | 'custom' =
+    wallpaperTextColor === '' ? 'auto' : wallpaperTextColor === '#111111' ? 'dark' : wallpaperTextColor === '#eeeeee' ? 'light' : 'custom'
 
   const searchWallpapers = async (): Promise<void> => {
     setWpSearching(true)
@@ -225,6 +229,35 @@ export function SettingsPage(): React.JSX.Element {
                 />
                 <span className="text-[11px] font-mono fg-2">{settings?.wallpaperOpacity ?? 40}%</span>
               </div>
+              {currentWallpaper && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] fg-2">文字颜色</span>
+                  <Segmented
+                    options={[
+                      { value: 'auto', label: '跟随主题' },
+                      { value: 'dark', label: '深色' },
+                      { value: 'light', label: '浅色' },
+                      { value: 'custom', label: '自定义' }
+                    ]}
+                    value={wallpaperTextMode}
+                    onChange={(v) => {
+                      const next =
+                        v === 'auto' ? '' : v === 'dark' ? '#111111' : v === 'light' ? '#eeeeee' : wallpaperTextColor || '#666666'
+                      void saveSettings({ wallpaperTextColor: next })
+                    }}
+                  />
+                  {wallpaperTextMode === 'custom' && (
+                    <input
+                      type="color"
+                      value={/^#[0-9a-fA-F]{6}$/.test(wallpaperTextColor) ? wallpaperTextColor : '#666666'}
+                      onChange={(e) => void saveSettings({ wallpaperTextColor: e.target.value })}
+                      className="h-6 w-9 cursor-pointer rounded border-none bg-transparent p-0"
+                      title="自定义文字颜色"
+                    />
+                  )}
+                  <span className="text-[10px] fg-3">壁纸拉满不透明度后文字看不清时，选一个与壁纸相反的深浅色</span>
+                </div>
+              )}
             </div>
             {currentWallpaper && (
               <Button small variant="danger" onClick={() => void window.dsh.wallpaper.clear().then(() => void saveSettings({ wallpaperPath: '' }))}>

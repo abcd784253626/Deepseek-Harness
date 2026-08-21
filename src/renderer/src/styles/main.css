@@ -175,14 +175,16 @@ webview {
   z-index: 2;
   height: 100%;
 }
-/* 有壁纸时让壳层半透明，露出背景 */
+/* 有壁纸时让壳层半透明，露出背景：侧栏与主内容区一致，直接透出壁纸，
+   壁纸清晰度跟随全局「不透明度」遮罩（wallpaper-mask）一起变化。 */
 body.has-wallpaper .app-sidebar,
+body.has-wallpaper .app-page-bg {
+  background: transparent !important;
+}
+/* 标题栏保留薄底色 + 毛玻璃（窗口控制按钮需要底衬） */
 body.has-wallpaper .titlebar-bg {
   background: color-mix(in srgb, var(--bg) 86%, transparent) !important;
   backdrop-filter: blur(6px);
-}
-body.has-wallpaper .app-page-bg {
-  background: transparent !important;
 }
 /* 有壁纸时终端输出区半透明 + 毛玻璃，露出完整壁纸 */
 body.has-wallpaper .terminal-output {

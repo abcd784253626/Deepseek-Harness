@@ -161,7 +161,7 @@ export function registerIpc(): void {
   const SETTINGS_KEYS = new Set([
     'followSystemTheme', 'themeId', 'autoStartKernel', 'minimizeToTray', 'kernelPort',
     'dshPathOverride', 'dshHomeOverride', 'lastWorkspaceId', 'lastMode', 'customCss',
-    'wallpaperPath', 'wallpaperOpacity', 'openAtLogin',
+    'wallpaperPath', 'wallpaperOpacity', 'wallpaperTextColor', 'openAtLogin',
     'usagePriceInput', 'usagePriceCache', 'usagePriceOutput'
   ])
   ipcMain.handle(IPC.settings.get, () => getSettings())

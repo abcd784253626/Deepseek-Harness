@@ -86,6 +86,7 @@ const DEFAULT_SETTINGS: DesktopSettings = {
   customCss: '',
   wallpaperPath: '',
   wallpaperOpacity: 40,
+  wallpaperTextColor: '',
   openAtLogin: false,
   // 用量估算计价（元/百万 tokens）：DeepSeek V4-Flash 空闲时段（2026-08-17 调价后）
   // 输入（缓存未命中）1.5 / 缓存命中 0.05 / 输出 4.5；可在设置页按实际模型调整

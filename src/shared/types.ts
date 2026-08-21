@@ -192,6 +192,8 @@ export interface DesktopSettings {
   wallpaperPath: string
   /** 壁纸不透明度 0-100 */
   wallpaperOpacity: number
+  /** 壁纸文字颜色（hex 或空 = 跟随主题；壁纸拉高不透明度后用于保证文字可读） */
+  wallpaperTextColor: string
   /** 开机自启 */
   openAtLogin: boolean
   /** 用量估算计价：输入（未命中缓存）¥/百万 tokens */

@@ -27,10 +27,10 @@ export default function App(): React.JSX.Element {
     void useApp.getState().bootstrap()
   }, [])
 
-  // 主题实时应用（切换无闪烁）
+  // 主题实时应用（切换无闪烁）；壁纸文字颜色覆盖一并生效
   useEffect(() => {
-    if (activeTheme) applyThemeToDocument(activeTheme, customCss)
-  }, [activeTheme, customCss])
+    if (activeTheme) applyThemeToDocument(activeTheme, customCss, settings?.wallpaperTextColor ?? '')
+  }, [activeTheme, customCss, settings?.wallpaperTextColor])
 
   // 壁纸背景
   const wallpaperUrl = useMemo(() => wallpaperUrlOf(settings?.wallpaperPath), [settings?.wallpaperPath])

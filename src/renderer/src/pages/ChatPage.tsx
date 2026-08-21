@@ -7,7 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ExternalLink, RefreshCw, Play, Square, Power } from 'lucide-react'
 import { useApp } from '../stores/app'
-import { buildWebviewThemeScript, wallpaperUrlOf } from '../lib/theme'
+import { buildWebviewThemeScript, wallpaperSrcOf, wallpaperUrlOf } from '../lib/theme'
+import { alignedWallpaperBackground, loadImageSize } from '../lib/wallpaper'
 import { Badge, Button, Segmented } from '../components/ui'
 import { WEBVIEW_PARTITION } from '@shared/types'
 import type { AgentMode } from '@shared/types'
@@ -33,6 +34,10 @@ export function ChatPage(): React.JSX.Element {
   const webviewRef = useRef<WebviewElement | null>(null)
   const [url, setUrl] = useState<string | null>(null)
   const [injectTick, setInjectTick] = useState(0)
+  // 与壳层对齐的壁纸背景声明（null = 未对齐，回退 cover）
+  const [alignedBg, setAlignedBg] = useState<string | null>(null)
+  const imageSizeRef = useRef<{ width: number; height: number } | null>(null)
+  const alignedPathRef = useRef<string | null>(null)
   const themeRef = useRef(activeTheme)
   const cssRef = useRef(customCss)
   const wallpaperRef = useRef<string | null>(null)
@@ -51,32 +56,124 @@ export function ChatPage(): React.JSX.Element {
     }
   }, [kernel])
 
+  // webview 就绪（dom-ready 已发出）后才允许注入主题脚本：
+  // Electron 的 executeJavaScript 在未就绪时会同步抛错，穿透 React 提交阶段
+  // 直接崩掉整个渲染层（「设置→会话白屏」的根因）。就绪前一律不调用。
+  const [webviewReady, setWebviewReady] = useState(false)
+  const webviewReadyRef = useRef(false)
+
   const handleDomReady = useCallback(() => {
+    webviewReadyRef.current = true
+    setWebviewReady(true)
     setInjectTick((t) => t + 1)
   }, [])
 
-  // dom-ready 后注入主题；主题变化时重新注入
-  useEffect(() => {
-    const wv = webviewRef.current
-    if (!wv) return
-    wv.addEventListener('dom-ready', handleDomReady)
-    return () => wv.removeEventListener('dom-ready', handleDomReady)
-  }, [handleDomReady, url])
+  // ref 绑定即挂 dom-ready 监听（不等 effect，防秒开的缓存页漏掉事件）；
+  // 并用一次安全探测兜底：若 dom-ready 已发出，立即置为就绪
+  const bindWebview = useCallback(
+    (el: HTMLElement | null) => {
+      const wv = el as unknown as WebviewElement | null
+      if (wv === webviewRef.current) return
+      if (webviewRef.current) {
+        webviewRef.current.removeEventListener('dom-ready', handleDomReady)
+      }
+      webviewRef.current = wv
+      if (wv) {
+        wv.addEventListener('dom-ready', handleDomReady)
+        try {
+          void wv.executeJavaScript('1').then(
+            () => {
+              webviewReadyRef.current = true
+              setWebviewReady(true)
+            },
+            () => undefined
+          )
+        } catch {
+          /* 未就绪，等 dom-ready */
+        }
+      } else {
+        webviewReadyRef.current = false
+        setWebviewReady(false)
+      }
+    },
+    [handleDomReady]
+  )
 
+  // 壁纸对齐：让 webview 内的壁纸与壳层 full-window cover 裁剪无缝衔接
+  // （一整张连续壁纸，而非每个区域各自 cover 造成分层）。窗口尺寸 / webview
+  // 几何 / 壁纸路径变化时重算，结果存入 alignedBg 触发重新注入。
   useEffect(() => {
-    if (!running || !activeTheme) return
+    const wv = webviewRef.current
+    if (!running || !url || !settings?.wallpaperPath) {
+      imageSizeRef.current = null
+      alignedPathRef.current = null
+      setAlignedBg(null)
+      return
+    }
+    if (!wv) return
+
+    const compute = (): void => {
+      const size = imageSizeRef.current
+      if (!size) return
+      setAlignedBg(
+        alignedWallpaperBackground({
+          viewportW: window.innerWidth,
+          viewportH: window.innerHeight,
+          rect: wv.getBoundingClientRect(),
+          imageW: size.width,
+          imageH: size.height
+        })
+      )
+    }
+
+    const path = settings.wallpaperPath
+    if (alignedPathRef.current !== path) {
+      alignedPathRef.current = path
+      imageSizeRef.current = null
+      setAlignedBg(null)
+      const src = wallpaperSrcOf(path)
+      if (src) {
+        void loadImageSize(src)
+          .then((size) => {
+            imageSizeRef.current = size
+            compute()
+          })
+          .catch(() => setAlignedBg(null))
+      }
+    } else if (imageSizeRef.current) {
+      compute()
+    }
+
+    const ro = new ResizeObserver(() => compute())
+    ro.observe(wv)
+    window.addEventListener('resize', compute)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', compute)
+    }
+  }, [running, url, settings?.wallpaperPath])
+
+  // 就绪后注入主题；主题/壁纸/几何变化时重新注入。
+  // executeJavaScript 一律包 try/catch：同步抛错（未就绪竞态）不再崩渲染层。
+  useEffect(() => {
+    if (!running || !activeTheme || !webviewReady) return
     const wv = webviewRef.current
     if (!wv) return
-    void wv
-      .executeJavaScript(buildWebviewThemeScript(activeTheme, customCss, wallpaperRef.current))
-      .catch(() => setInjectTick((t) => t + 1))
-    // 等 webview 存在后再注入（dom-ready 可能早于 ref 绑定）
-    const timer = setTimeout(() => {
-      const wv2 = webviewRef.current
-      if (wv2) void wv2.executeJavaScript(buildWebviewThemeScript(themeRef.current!, cssRef.current, wallpaperRef.current)).catch(() => undefined)
-    }, 400)
+    const opacity = settings?.wallpaperOpacity ?? 40
+    const textColor = settings?.wallpaperTextColor ?? ''
+    const inject = (): void => {
+      try {
+        void wv
+          .executeJavaScript(buildWebviewThemeScript(activeTheme, customCss, wallpaperRef.current, opacity, alignedBg, textColor))
+          .catch(() => setInjectTick((t) => t + 1))
+      } catch {
+        /* 同步抛错兜底：等下一次 ready/tick 触发 */
+      }
+    }
+    inject()
+    const timer = setTimeout(inject, 400)
     return () => clearTimeout(timer)
-  }, [running, activeTheme, customCss, injectTick, settings?.wallpaperPath, settings?.wallpaperOpacity])
+  }, [running, activeTheme, customCss, injectTick, webviewReady, settings?.wallpaperPath, settings?.wallpaperOpacity, settings?.wallpaperTextColor, alignedBg])
 
   const changeMode = useCallback(
     async (mode: AgentMode) => {
@@ -141,9 +238,7 @@ export function ChatPage(): React.JSX.Element {
       {running && url ? (
         <div className="webview-wrap min-h-0">
           <webview
-            ref={(el) => {
-              webviewRef.current = el as unknown as WebviewElement | null
-            }}
+            ref={bindWebview}
             src={url}
             partition={WEBVIEW_PARTITION}
             className="min-h-0"
