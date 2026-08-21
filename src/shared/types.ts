@@ -288,6 +288,9 @@ export interface WallpaperInfo {
 
 // ─── IPC 通道常量 ─────────────────────────────────────────────
 
+/** 会话页 webview 使用的独立 session partition（与主渲染进程隔离） */
+export const WEBVIEW_PARTITION = 'persist:dsh-official'
+
 export const IPC = {
   app: {
     info: 'app:info',

@@ -6,13 +6,14 @@
  *  3. 路径白名单：仅允许已登记的壁纸路径与工作区/用户图片目录（防任意文件读取）
  *  4. 大小上限
  */
-import { protocol, net } from 'electron'
+import { protocol, net, session } from 'electron'
 import { pathToFileURL } from 'node:url'
 import { lstatSync, readFileSync } from 'node:fs'
 import { dirname, normalize, sep } from 'node:path'
 import { extOf, IMAGE_EXTS, formatOf } from './image-meta'
 import { getSettings, listWorkspaces } from '../store/database'
 import { defaultImageDirs, listLocalDrives } from './scanner'
+import { WEBVIEW_PARTITION } from '@shared/types'
 
 const MAX_SERVE_BYTES = 50 * 1024 * 1024
 
@@ -69,7 +70,7 @@ async function isAllowedPath(filePath: string): Promise<boolean> {
 }
 
 export function registerImageProtocol(): void {
-  protocol.handle('dsh-img', async (request) => {
+  const handler: Parameters<typeof protocol.handle>[1] = async (request) => {
     try {
       const url = new URL(request.url)
       const encoded = url.pathname.replace(/^\//, '')
@@ -113,5 +114,14 @@ export function registerImageProtocol(): void {
     } catch {
       return new Response('bad request', { status: 400 })
     }
-  })
+  }
+  // 默认 session（设置页缩略图、壳层壁纸）
+  protocol.handle('dsh-img', handler)
+  // 会话页 webview 的独立 partition：protocol 模块只作用于默认 session，
+  // 不在此注册则 webview 内 dsh-img:// 请求无处理器，壁纸背景加载失败
+  try {
+    session.fromPartition(WEBVIEW_PARTITION).protocol.handle('dsh-img', handler)
+  } catch {
+    /* partition 不可用时仅默认 session 生效 */
+  }
 }

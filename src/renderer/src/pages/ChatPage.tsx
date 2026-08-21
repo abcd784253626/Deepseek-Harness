@@ -9,6 +9,7 @@ import { ExternalLink, RefreshCw, Play, Square, Power } from 'lucide-react'
 import { useApp } from '../stores/app'
 import { buildWebviewThemeScript, wallpaperUrlOf } from '../lib/theme'
 import { Badge, Button, Segmented } from '../components/ui'
+import { WEBVIEW_PARTITION } from '@shared/types'
 import type { AgentMode } from '@shared/types'
 
 interface WebviewElement extends HTMLElement {
@@ -144,7 +145,7 @@ export function ChatPage(): React.JSX.Element {
               webviewRef.current = el as unknown as WebviewElement | null
             }}
             src={url}
-            partition="persist:dsh-official"
+            partition={WEBVIEW_PARTITION}
             className="min-h-0"
           />
         </div>
