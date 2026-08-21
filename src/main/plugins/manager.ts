@@ -20,7 +20,7 @@ import {
   removeInstalledPlugin,
   setPluginEnabled as dbSetEnabled
 } from '../store/database'
-import { resolveDsh, pnpmAvailable } from '../kernel/resolver'
+import { resolveDsh, resolveSystemNode, pnpmAvailable } from '../kernel/resolver'
 import { fetchNpmMeta } from './registry'
 
 /** npm 包名白名单（含 scope）；防止路径遍历与 shell 元字符 */
@@ -159,7 +159,13 @@ private async dshPlugin(args: string[]): Promise<RunResult> {
     // 兜底路径（.cmd 且 bin.js 缺失）：参数已由调用方白名单校验
     return runCommand(binary.path, true, ['plugin', '--profile', 'web', ...args], env)
   }
-  return runCommand(binary.path, false, ['plugin', '--profile', 'web', ...args], env)
+  // 必须用系统 Node 执行 bin.js：process.execPath 是 electron.exe（打包后为 DSH Desktop.exe），
+  // 不带 ELECTRON_RUN_AS_NODE 时会把 bin.js 当应用入口加载导致 plugin 命令从未真正执行。
+  const nodePath = resolveSystemNode()
+  if (!nodePath) {
+    return { ok: false, code: null, output: '未找到系统 Node.js 运行时。dsh 插件安装需要 Node.js 18+。' }
+  }
+  return runCommand(nodePath, false, [binary.path, 'plugin', '--profile', 'web', ...args], env)
 }
 
   /** 从 profile package.json 同步已安装插件到本地库 */

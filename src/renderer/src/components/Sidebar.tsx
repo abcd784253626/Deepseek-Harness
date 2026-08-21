@@ -51,10 +51,11 @@ function fmtYuan(v: number): string {
   return v > 0 ? v.toFixed(4).replace(/0+$/, '').replace(/\.$/, '') : '0.00'
 }
 
-/** 用量面板：今日 tokens / 今日费用 / 累计费用 + 比例条 + 悬停明细 */
+/** 用量面板：今日 tokens / 今日费用 / 累计费用 + 比例条 + 点击展开各工作区分账 */
 function UsagePanel(): React.JSX.Element {
   const usage = useApp((s) => s.usage)
   const refreshUsage = useApp((s) => s.refreshUsage)
+  const [expanded, setExpanded] = useState(false)
 
   if (!usage) return <></>
 
@@ -65,10 +66,7 @@ function UsagePanel(): React.JSX.Element {
   const tooltip =
     usage.sessionCount === 0
       ? '暂无用量数据'
-      : `今日 = 今日有活动的会话累计（近似）\n估算金额按 ¥/百万 tokens：输入 ${usage.pricing.input} · 缓存 ${usage.pricing.cacheRead} · 输出 ${usage.pricing.output}\n—— 各工作区累计 ——\n${usage.workspaces
-          .slice(0, 5)
-          .map((w) => `${w.label}：¥${fmtYuan(w.cost.total)}（${w.sessionCount} 个会话）`)
-          .join('\n')}${usage.workspaces.length > 5 ? `\n… 共 ${usage.workspaces.length} 个工作区` : ''}`
+      : `今日 = 今日有活动的会话累计（近似）\n估算金额按 ¥/百万 tokens：输入 ${usage.pricing.input} · 缓存 ${usage.pricing.cacheRead} · 输出 ${usage.pricing.output}（设置 → 用量与计费 可调整）`
 
   return (
     <div
@@ -76,18 +74,33 @@ function UsagePanel(): React.JSX.Element {
       style={{ borderColor: 'var(--border)', background: 'var(--bg-elevated)' }}
       title={tooltip}
     >
-      <div className="mb-1 flex items-center gap-1">
+      <button
+        type="button"
+        className="mb-1 flex w-full items-center gap-1 text-left"
+        onClick={() => setExpanded((v) => !v)}
+      >
         <Wallet size={11} className="fg-2" />
         <span className="flex-1 text-[11px] fg-2">用量统计</span>
-        <button
-          type="button"
+        <span className={`text-[10px] transition-transform ${expanded ? 'rotate-90' : ''}`} style={{ color: 'var(--fg-3)' }}>›</span>
+        <span
+          role="button"
+          tabIndex={0}
           className="btn-pill sm !px-1"
           title="刷新用量"
-          onClick={() => void refreshUsage()}
+          onClick={(e) => {
+            e.stopPropagation()
+            void refreshUsage()
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.stopPropagation()
+              void refreshUsage()
+            }
+          }}
         >
           <RefreshCw size={10} />
-        </button>
-      </div>
+        </span>
+      </button>
       {usage.sessionCount === 0 ? (
         <div className="px-1 pb-1 text-[11px] fg-3">暂无用量数据</div>
       ) : (
@@ -115,6 +128,24 @@ function UsagePanel(): React.JSX.Element {
               <span className="font-mono" style={{ color: 'var(--fg)' }}>≈ ¥{fmtYuan(total.cost.total)}</span>
             </div>
           </div>
+          {expanded && (
+            <div className="mt-1.5 flex flex-col gap-[3px] border-t pt-1.5" style={{ borderColor: 'var(--border)' }}>
+              {usage.workspaces.length === 0 ? (
+                <div className="px-1 text-[11px] fg-3">暂无分账数据</div>
+              ) : (
+                usage.workspaces.map((w) => (
+                  <div key={w.path} className="flex items-center gap-1.5 px-1 text-[11px]" title={w.path}>
+                    <span className="min-w-0 flex-1 truncate fg-2">{w.label}</span>
+                    <span className="text-[10px] fg-3">{w.sessionCount} 会话</span>
+                    <span className="font-mono" style={{ color: 'var(--fg)' }}>¥{fmtYuan(w.cost.total)}</span>
+                  </div>
+                ))
+              )}
+              <div className="px-1 pt-0.5 text-[10px] fg-3">
+                今日 tokens：入 {fmtTokens(today.totals.inputTokens)} · 缓存 {fmtTokens(today.totals.cacheReadTokens)} · 出 {fmtTokens(today.totals.outputTokens)}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
