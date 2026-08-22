@@ -153,14 +153,14 @@ export function Modal({
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'color-mix(in srgb, var(--bg) 55%, transparent)' }}
+      style={{ background: 'color-mix(in srgb, var(--bg) 45%, transparent)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
       <div
-        className="flex max-h-[82vh] w-full flex-col overflow-hidden rounded-2xl"
-        style={{ width, background: 'var(--bg-elevated)', boxShadow: '0 12px 48px color-mix(in srgb, var(--fg) 14%, transparent)' }}
+        className="glass-strong flex max-h-[82vh] w-full flex-col overflow-hidden rounded-2xl"
+        style={{ width }}
       >
         <div className="flex items-center justify-between px-5 py-3">
           <h2 className="text-[14px] font-medium" style={{ color: 'var(--fg)' }}>

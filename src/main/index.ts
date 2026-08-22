@@ -78,6 +78,14 @@ function bootstrap(): void {
       /* 缓存清理失败不影响启动 */
     }
 
+    // 启动即对账已安装插件（profile → 本地库），保证重启后已安装列表准确
+    try {
+      const { pluginManager } = require('./plugins/manager') as typeof import('./plugins/manager')
+      pluginManager.syncInstalled()
+    } catch {
+      /* 插件对账失败不影响启动 */
+    }
+
     // 启动时自动拉起内核（默认开启）
     const settings = getSettings()
     if (settings.autoStartKernel) {

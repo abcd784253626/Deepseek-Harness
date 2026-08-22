@@ -18,7 +18,8 @@ import {
   listInstalledPlugins,
   upsertInstalledPlugin,
   removeInstalledPlugin,
-  setPluginEnabled as dbSetEnabled
+  setPluginEnabled as dbSetEnabled,
+  type InstalledPluginRow
 } from '../store/database'
 import { resolveDsh, resolveSystemNode, pnpmAvailable } from '../kernel/resolver'
 import { fetchNpmMeta } from './registry'
@@ -29,6 +30,16 @@ export const NPM_NAME_RE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._
 /** 校验依赖键为合法 npm 包名（syncInstalled 读取其 node_modules 路径时使用） */
 export function isSafePackageName(name: string): boolean {
   return NPM_NAME_RE.test(name) && !name.includes('..') && !name.includes('\\')
+}
+
+/**
+ * 计算 profile node_modules 下某个依赖的 package.json 绝对路径。
+ * name 已是完整包名（含 scope，如 @scope/name），直接拼到 node_modules 下即可，
+ * 兼容 scoped 与普通包名；非法/不安全包名返回 null。
+ */
+function safePkgPath(profileDir: string, name: string): string | null {
+  if (!profileDir || !isSafePackageName(name)) return null
+  return join(profileDir, 'node_modules', name, 'package.json')
 }
 
 export function resolveProfileDir(dshHomeOverride = ''): string {
@@ -168,11 +179,19 @@ private async dshPlugin(args: string[]): Promise<RunResult> {
   return runCommand(nodePath, false, [binary.path, 'plugin', '--profile', 'web', ...args], env)
 }
 
-  /** 从 profile package.json 同步已安装插件到本地库 */
+  /**
+   * 从 profile package.json 同步已安装插件到本地库（profile 为权威来源）。
+   *
+   * 设计要点：
+   * 1. profile.dependencies 中每一项都 upsert 进 installed_plugins（保证安装后、重启后都能显示）；
+   * 2. 版本号优先从本地 node_modules 的 package.json 读取，兼容 scoped 包名；
+   * 3. enabled 同时匹配 bundles 中的「包名」与「link: 路径」两种写法；
+   * 4. 数据一致性：清理孤儿记录（profile 已无此依赖且非内置的 DB 条目），
+   *    仅当 profile 存在时才清理，避免 profile 尚未生成时误删已安装记录；
+   * 5. 任何解析异常都不应清空列表 —— 回退到已有 DB 记录。
+   */
   syncInstalled(): InstalledPlugin[] {
-    const rows = listInstalledPlugins()
-    const known = new Set(rows.map((r) => r.name))
-    const toInstalled = (r: (typeof rows)[number]): InstalledPlugin => ({
+    const toInstalled = (r: InstalledPluginRow): InstalledPlugin => ({
       name: r.name,
       version: r.version,
       spec: r.spec,
@@ -181,47 +200,57 @@ private async dshPlugin(args: string[]): Promise<RunResult> {
       installedAt: r.installedAt,
       category: r.category as PluginCategory
     })
-    const profile = readProfileJson()
-    if (profile) {
-      for (const [name, spec] of Object.entries(profile.dependencies)) {
-        const kind = spec.startsWith('link:') ? 'link' : 'npm'
-        const bundles = profile.bundles
-        const isBundle = bundles.includes(name) || bundles.includes(spec.replace(/^link:/, ''))
+    try {
+      const profile = readProfileJson()
+      const profileDeps = profile?.dependencies ?? {}
+      const bundles = new Set(profile?.bundles ?? [])
+      const profileDir = profile ? resolveProfileDir() : ''
+
+      // 现有 DB 记录（用于保留首次安装时间，避免每次同步都刷新成当前时间）
+      const existing = new Map(listInstalledPlugins().map((r) => [r.name, r] as const))
+
+      const seen = new Set<string>()
+      for (const [name, spec] of Object.entries(profileDeps)) {
+        const kind: InstalledPlugin['kind'] = spec.startsWith('link:') ? 'link' : 'npm'
+        const linkName = spec.replace(/^link:/, '')
+        const isBundle = bundles.has(name) || bundles.has(linkName)
+        // 版本号：优先从本地 node_modules 的 package.json 读取（兼容 scoped 包名）
+        let version = ''
+        const pkgPath = safePkgPath(profileDir, name)
+        if (pkgPath && existsSync(pkgPath)) {
+          try {
+            const doc = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: string }
+            version = doc.version ?? ''
+          } catch {
+            /* 损坏的包忽略 */
+          }
+        }
+        const prev = existing.get(name)
         upsertInstalledPlugin({
           name,
-          version: '',
+          version,
           spec,
           kind,
           enabled: isBundle,
-          installedAt: rows.find((r) => r.name === name)?.installedAt ?? Date.now(),
-          category: 'other'
+          installedAt: prev?.installedAt ?? Date.now(),
+          category: prev?.category && prev.category !== 'other' ? prev.category : 'other'
         })
-        known.add(name)
+        seen.add(name)
       }
-      // 补全版本号（读 profile node_modules 的 package.json；仅安全包名）
-      const dir = resolveProfileDir()
-      for (const name of known) {
-        if (!isSafePackageName(name)) continue
-        const pkgPath = join(dir, 'node_modules', name.replace('/', '/node_modules/'), 'package.json')
-        if (existsSync(pkgPath)) {
-          try {
-            const doc = JSON.parse(readFileSync(pkgPath, 'utf-8'))
-            upsertInstalledPlugin({
-              name,
-              version: doc.version ?? '',
-              spec: profile.dependencies[name] ?? '',
-              kind: (profile.dependencies[name] ?? '').startsWith('link:') ? 'link' : 'npm',
-              enabled: profile.bundles.includes(name),
-              installedAt: rows.find((r) => r.name === name)?.installedAt ?? Date.now(),
-              category: 'other'
-            })
-          } catch {
-            /* 忽略损坏的包 */
-          }
+
+      // 数据一致性：清理孤儿记录 —— profile 已无此依赖且非内置的 DB 条目
+      if (profile) {
+        for (const r of existing.values()) {
+          if (r.kind !== 'builtin' && !seen.has(r.name)) removeInstalledPlugin(r.name)
         }
       }
+
+      return listInstalledPlugins().map(toInstalled)
+    } catch (err) {
+      // 任意解析失败都不应清空列表：回退到已有 DB 记录
+      console.error('[plugins] syncInstalled 失败，回退到已有记录:', err)
+      return listInstalledPlugins().map(toInstalled)
     }
-    return listInstalledPlugins().map(toInstalled)
   }
 
   /** 安装（npm 包或 link: 本地路径）；安装后返回提示重启内核 */
@@ -258,12 +287,13 @@ private async dshPlugin(args: string[]): Promise<RunResult> {
     if (!result.ok) {
       return {
         ok: false,
-        message: `卸载失败（exit ${result.code ?? '?'}）`,
+        message: `卸载失败（exit ${result.code ?? '?'})`,
         logTail: result.output.split(/\r?\n/).filter(Boolean).slice(-40)
       }
     }
-    removeInstalledPlugin(name)
+    // 先按 profile 重新对账（依赖移除后不应再被写回），再确保 DB 中彻底删除该记录
     this.syncInstalled()
+    removeInstalledPlugin(name)
     return { ok: true, message: '卸载成功。内核将自动重启以卸载插件树。' }
   }
 

@@ -16,6 +16,34 @@
   --radius: 10px;
   --font-size: 14px;
   --font-family: 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+
+  /* ─── 毛玻璃（Glassmorphism）设计令牌 ───────
+     全部由主题令牌 color-mix 派生，自动跟随浅/深主题与自定义主题；
+     半透明背景 + 背景模糊 + 柔和边框 + 柔和阴影。 */
+  --glass-blur: 16px;
+  --glass-blur-strong: 26px;
+  --glass-blur-soft: 12px;
+  --glass-bg: color-mix(in srgb, var(--bg) 58%, transparent);
+  --glass-bg-strong: color-mix(in srgb, var(--bg) 80%, transparent);
+  --glass-bg-soft: color-mix(in srgb, var(--bg) 42%, transparent);
+  --glass-border: color-mix(in srgb, var(--fg) 16%, transparent);
+  --glass-border-soft: color-mix(in srgb, var(--fg) 10%, transparent);
+  --glass-inset: inset 0 1px 0 color-mix(in srgb, #ffffff 22%, transparent);
+  --glass-shadow: 0 8px 32px color-mix(in srgb, var(--fg) 12%, transparent);
+  --glass-shadow-soft: 0 2px 12px color-mix(in srgb, var(--fg) 9%, transparent);
+  --glass-shadow-strong: 0 18px 60px color-mix(in srgb, var(--fg) 20%, transparent);
+}
+
+/* 主题类型相关的阴影基底（深浅主题阴影观感不同） */
+html[data-theme-type='light'] {
+  --glass-shadow: 0 8px 32px rgba(17, 17, 17, 0.14);
+  --glass-shadow-soft: 0 2px 12px rgba(17, 17, 17, 0.10);
+  --glass-shadow-strong: 0 18px 60px rgba(17, 17, 17, 0.20);
+}
+html[data-theme-type='dark'] {
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --glass-shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.38);
+  --glass-shadow-strong: 0 18px 60px rgba(0, 0, 0, 0.55);
 }
 
 html,
@@ -24,7 +52,12 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: var(--bg);
+  /* 环境光渐变：玻璃面板背后始终有柔和的色彩可模糊，
+     无壁纸时即作为默认背景，有壁纸时被壁纸覆盖。 */
+  background:
+    radial-gradient(1200px 700px at 8% 4%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 58%),
+    radial-gradient(1100px 800px at 96% 100%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 55%),
+    var(--bg);
   color: var(--fg);
   font-family: var(--font-family);
   font-size: var(--font-size);
@@ -43,7 +76,7 @@ body,
 /* 1px 分割线 */
 .hairline { border: 0; border-top: 1px solid var(--border); }
 
-/* ─── 控件（Codex 极简：药丸、无描边、底色区分状态） ─────────── */
+/* ─── 控件（Codex 极简：药丸 + 柔和描边 + 玻璃质感） ─────────── */
 .btn-pill {
   display: inline-flex;
   align-items: center;
@@ -53,44 +86,71 @@ body,
   padding: 6px 14px;
   font-size: 13px;
   line-height: 1.4;
-  border: none;
+  border: 1px solid var(--glass-border-soft);
   cursor: pointer;
-  background: transparent;
+  background: color-mix(in srgb, var(--bg) 35%, transparent);
+  backdrop-filter: blur(var(--glass-blur-soft)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-soft)) saturate(140%);
   color: var(--fg-2);
-  transition: background 0.12s ease, color 0.12s ease;
+  box-shadow: var(--glass-inset), var(--glass-shadow-soft);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   user-select: none;
   white-space: nowrap;
 }
-.btn-pill:hover { background: var(--bg-subtle); color: var(--fg); }
+.btn-pill:hover {
+  background: var(--glass-bg-strong);
+  color: var(--fg);
+  border-color: var(--glass-border);
+  box-shadow: var(--glass-inset), var(--glass-shadow);
+}
 .btn-pill:disabled { color: var(--fg-3); cursor: default; }
-.btn-pill:disabled:hover { background: transparent; }
-.btn-pill.primary { background: var(--accent); color: var(--accent-fg); }
-.btn-pill.primary:hover { opacity: 0.88; }
+.btn-pill:disabled:hover {
+  background: color-mix(in srgb, var(--bg) 35%, transparent);
+  color: var(--fg-3);
+  border-color: var(--glass-border-soft);
+  box-shadow: var(--glass-inset), var(--glass-shadow-soft);
+}
+.btn-pill.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: var(--glass-inset), 0 4px 16px color-mix(in srgb, var(--accent) 36%, transparent);
+}
+.btn-pill.primary:hover { opacity: 0.9; color: var(--accent-fg); }
 /* 禁用态 primary：灰底 + 灰字，hover 不再变透明（否则白字配透明底=字消失） */
 .btn-pill.primary:disabled,
 .btn-pill.primary:disabled:hover {
   background: var(--bg-subtle);
   color: var(--fg-3);
+  border-color: var(--glass-border-soft);
   opacity: 1;
+  box-shadow: none;
 }
 .btn-pill.danger { color: var(--danger); }
-.btn-pill.danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.btn-pill.danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .btn-pill.sm { padding: 3px 10px; font-size: 12px; }
 
 .input-pill {
   border-radius: 999px;
-  border: none;
-  background: var(--bg-subtle);
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur-soft)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-soft)) saturate(140%);
+  box-shadow: var(--glass-inset);
   color: var(--fg);
   padding: 8px 16px;
   font-size: 13px;
   outline: none;
   width: 100%;
   font-family: inherit;
-  transition: background 0.12s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.input-pill:hover { background: color-mix(in srgb, var(--bg-subtle) 85%, var(--fg) 6%); }
-.input-pill:focus { background: color-mix(in srgb, var(--bg-subtle) 70%, var(--accent) 6%); }
+.input-pill:hover { border-color: var(--glass-border); }
+.input-pill:focus {
+  background: var(--glass-bg-strong);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: var(--glass-inset), 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
 .input-pill::placeholder { color: var(--fg-3); }
 
 /* 侧栏导航项 */
@@ -110,8 +170,13 @@ body,
   text-align: left;
   transition: background 0.12s ease, color 0.12s ease;
 }
-.nav-item:hover { background: var(--bg-subtle); color: var(--fg); }
-.nav-item.active { background: var(--bg-subtle); color: var(--fg); font-weight: 500; }
+.nav-item:hover { background: var(--glass-bg-strong); color: var(--fg); }
+.nav-item.active {
+  background: var(--glass-bg-strong);
+  color: var(--fg);
+  font-weight: 500;
+  box-shadow: var(--glass-inset);
+}
 .nav-item.active::before {
   content: '';
   position: absolute;
@@ -152,6 +217,65 @@ webview {
   background: var(--bg);
 }
 
+/* ─── 毛玻璃工具类 ────────────────────────────────────────── */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-inset), var(--glass-shadow);
+}
+.glass-strong {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-inset), var(--glass-shadow-strong);
+}
+.glass-soft {
+  background: var(--glass-bg-soft);
+  backdrop-filter: blur(var(--glass-blur-soft)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-soft)) saturate(140%);
+  border: 1px solid var(--glass-border-soft);
+  box-shadow: var(--glass-inset), var(--glass-shadow-soft);
+}
+
+/* 卡片：圆角 + 描边的容器统一磨砂化（!important 压过内联背景） */
+.rounded-xl.border {
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%) !important;
+  box-shadow: var(--glass-inset), var(--glass-shadow) !important;
+}
+
+/* 壳层三大表面：标题栏 / 侧栏 / 主内容区 一律玻璃化（!important 压过内联背景） */
+.titlebar-bg {
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+  border-bottom: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow-soft) !important;
+}
+.app-sidebar {
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%) !important;
+  border-right: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow-soft) !important;
+}
+.app-page-bg {
+  background: var(--glass-bg-soft) !important;
+  backdrop-filter: blur(var(--glass-blur-soft)) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur-soft)) saturate(140%) !important;
+}
+/* 终端输出区：磨砂玻璃，露出（被遮罩柔化后的）背景 */
+.terminal-output {
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: blur(10px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(140%) !important;
+  border: 1px solid var(--glass-border-soft) !important;
+}
+
 /* ─── 壁纸层 ──────────────────────────────────────────────── */
 .wallpaper-layer {
   position: absolute;
@@ -175,19 +299,15 @@ webview {
   z-index: 2;
   height: 100%;
 }
-/* 有壁纸时让壳层半透明，露出背景：侧栏与主内容区一致，直接透出壁纸，
-   壁纸清晰度跟随全局「不透明度」遮罩（wallpaper-mask）一起变化。 */
-body.has-wallpaper .app-sidebar,
-body.has-wallpaper .app-page-bg {
-  background: transparent !important;
-}
-/* 标题栏保留薄底色 + 毛玻璃（窗口控制按钮需要底衬） */
+/* 有壁纸时：壳层表面保持玻璃（半透明 + 模糊）透出壁纸，而非纯透明；
+   壁纸清晰度仍跟随全局「不透明度」遮罩（wallpaper-mask）一起变化。 */
 body.has-wallpaper .titlebar-bg {
-  background: color-mix(in srgb, var(--bg) 86%, transparent) !important;
-  backdrop-filter: blur(6px);
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
 }
-/* 有壁纸时终端输出区半透明 + 毛玻璃，露出完整壁纸 */
 body.has-wallpaper .terminal-output {
-  background: color-mix(in srgb, var(--bg-subtle) 74%, transparent) !important;
-  backdrop-filter: blur(6px);
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: blur(10px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(140%) !important;
 }

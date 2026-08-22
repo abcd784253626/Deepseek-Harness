@@ -142,14 +142,13 @@ export function CommandPalette(): React.JSX.Element | null {
   return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-start justify-center pt-[12vh]"
-      style={{ background: 'color-mix(in srgb, var(--bg) 50%, transparent)' }}
+      style={{ background: 'color-mix(in srgb, var(--bg) 45%, transparent)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) setOpen(false)
       }}
     >
       <div
-        className="w-[560px] max-w-[90vw] overflow-hidden rounded-2xl"
-        style={{ background: 'var(--bg-elevated)', boxShadow: '0 16px 64px color-mix(in srgb, var(--fg) 18%, transparent)', border: '1px solid var(--border)' }}
+        className="glass-strong w-[560px] max-w-[90vw] overflow-hidden rounded-2xl"
       >
         <div className="flex items-center gap-2 border-b px-4" style={{ borderColor: 'var(--border)' }}>
           <Search size={14} className="fg-3" />
